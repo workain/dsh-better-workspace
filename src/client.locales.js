@@ -14,6 +14,9 @@ window.__ModuleLoader__.load({
   factory: () => {
 
     const zh = {
+      'board.open': "打开工作区看板",
+      'board.configure': "默认工作区看板…",
+      'board.failed': "看板未接受此操作。请检查其可用性后重试。",
       'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
       'service.toggle': "Expand or collapse workspace",
@@ -214,6 +217,9 @@ window.__ModuleLoader__.load({
     }
 
     const en = {
+      'board.open': "Open workspace board",
+      'board.configure': "Default workspace board…",
+      'board.failed': "The board could not accept this action. Check its availability and try again.",
       'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
       'service.toggle': "Expand or collapse workspace",
@@ -422,6 +428,9 @@ window.__ModuleLoader__.load({
     const LOCALES = {
       /* locale: ar */
       'ar': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -622,6 +631,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: de */
       'de': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -822,6 +834,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: fr */
       'fr': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -1022,6 +1037,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: hi */
       'hi': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -1222,6 +1240,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: id */
       'id': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -1422,6 +1443,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: it */
       'it': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -1622,6 +1646,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: ja */
       'ja': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -1822,6 +1849,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: ko */
       'ko': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -2022,6 +2052,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: nl */
       'nl': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -2222,6 +2255,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: pl */
       'pl': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -2422,6 +2458,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: pt */
       'pt': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -2622,6 +2661,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: ru */
       'ru': {
+        'board.open': "Открыть доску воркспейса",
+        'board.configure': "Доска воркспейса по умолчанию…",
+        'board.failed': "Доска не приняла действие. Проверьте её доступность и повторите.",
         'service.loading': "Список сессий загружается. Повторите после загрузки.",
       'service.choose': "Управляющая сессия…",
         'service.toggle': "Развернуть или свернуть рабочую область",
@@ -2822,6 +2864,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: sv */
       'sv': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -3022,6 +3067,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: th */
       'th': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -3222,6 +3270,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: tr */
       'tr': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -3422,6 +3473,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: vi */
       'vi': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -3622,6 +3676,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: zh-HK */
       'zh-HK': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -3822,6 +3879,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: zh-MO */
       'zh-MO': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",
@@ -4022,6 +4082,9 @@ window.__ModuleLoader__.load({
       },
       /* locale: zh-TW */
       'zh-TW': {
+        'board.open': "Open workspace board",
+        'board.configure': "Default workspace board…",
+        'board.failed': "The board could not accept this action. Check its availability and try again.",
         'service.loading': "The session catalog is loading. Try again when it is ready.",
       'service.choose': "Managing session…",
         'service.toggle': "Expand or collapse workspace",

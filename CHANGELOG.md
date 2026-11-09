@@ -3,7 +3,12 @@
 > 倒序排列,新版本条目在最上面。条目格式:`## vX.Y.Z — YYYY-MM-DD` + 类型(feat / fix / docs / chore)+ 要点 + 相关链接。
 > 纪律见 AGENTS.md「变更记录纪律」:发版前先更新本文件并随版本提交;事故复盘、复现与真机验证记录也记在这里。
 
-## UNRELEASED — Workain fork
+## v0.41.0-workain.2 — 2026-11-09 (candidate, not installed)
+
+- feat: optional board-owned workspace menu actions for opening/configuring that workspace's default board; managing-session clicks and expansion remain unchanged. No Harness-wide default board.
+- test: optional provider absence/disposal/replacement, rejected intents and separate A/B workspace targets are covered by executable menu tests.
+
+## v0.41.0-workain.1 — 2026-11-09 (reviewed, installed after owner approval)
 
 - feat: explicit managing-session assignment in native profile settings; separate workspace label navigation and expansion control.
 - fix: scope group mutations by exact tree identity and complete underlying membership; preview sequential writes and report partial/unknown outcomes without automatic retries.

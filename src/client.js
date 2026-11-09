@@ -3622,7 +3622,7 @@ window.__ModuleLoader__.load({
         shippedBrowserFace, scheduleSeatReader, seatEntriesReader,
         officialT,
         presetFaceOf,
-        contextMenuFaceOf, setMenuBridge, bindingStore, refreshCatalog, readTitles,
+        contextMenuFaceOf, setMenuBridge, bindingStore, refreshCatalog, readTitles, workspaceBoardActions,
         t,
       } = props
       // Issue #13: local reads and writes go through OUR store instance, never
@@ -6540,6 +6540,8 @@ window.__ModuleLoader__.load({
           submenu: options.map((option) => ({ id: option.id, label: option.label })),
         }]
       }
+      const boardActions = (workspaceId) => typeof workspaceBoardActions === 'function'
+        ? workspaceBoardActions(workspaceId, t, fail) : []
       const menuEntries = () => {
         if (ctx === null) return []
         const customizeEntry = { id: 'customize', label: t('custom.title'), icon: icon('IconPersonalizationOutline16', 16) }
@@ -6570,6 +6572,7 @@ window.__ModuleLoader__.load({
         ]
         if (ctx.kind === 'workspace') return [
           { id: 'service-binding', label: t('service.choose') },
+          ...boardActions(ctx.payload.workspaceId),
           { id: 'rename', label: ot ? ot('rename') : t('menu.rename'), icon: icon('IconEditOutline16', 16) },
           { id: 'delete', label: ot ? ot('delete.workspace') : t('menu.delete'), icon: icon('IconTrashOutline16', 16), danger: true },
           { type: 'separator', id: 'bw-sep' },
@@ -6620,6 +6623,12 @@ window.__ModuleLoader__.load({
           }
           return
         }
+        if (kind === 'workspace' && (id === 'bw-board-open' || id === 'bw-board-configure')) {
+          const action = boardActions(payload.workspaceId).find(action => action.id === id)
+          if (action) action.run()
+          else fail(t('board.failed'))
+          return
+        }
         if (id === 'service-binding') {
           const workspace = kind === 'workspace' ? (items || []).find(w => w.workspaceId === payload.workspaceId)
             : (items || []).find(w => (w.sessionIds || []).includes(payload.id))
@@ -6654,6 +6663,7 @@ window.__ModuleLoader__.load({
       // The effect republishes after every render: slash switches, the preset
       // face and the current session inventory all feed availability.
       const menuBridgeValue = {
+        boardActions,
         serviceBinding: (kind, id) => {
           const workspace = (items || []).find(w => kind === 'workspace' ? w.workspaceId === id : (w.sessionIds || []).includes(id))
           if (workspace) setDialog({ kind: 'service-binding', workspace, initialSessionId: kind === 'session' ? id : undefined })
@@ -7184,6 +7194,9 @@ window.__ModuleLoader__.load({
       recoveryFeature = await require.async('./client.recovery.js')
       batchUI = await require.async('./client.batch-ui.js')
       planFeature = await require.async('./client.plans.js')
+      const boardFeature = await require.async('./client.board.js')
+      const workspaceBoardActions = (workspaceId, label, failed) => boardFeature.actions(
+        () => ctx.get('workspaceBoard'), workspaceId, label, failed)
       const titlesFeature = await require.async('./client.titles.js')
       const readTitles = await titlesFeature.mount(ctx)
       bindingStore = serviceFeature.createBindingStore(async (workspaceId, id) => {
@@ -7380,7 +7393,8 @@ window.__ModuleLoader__.load({
             const title = String((target && target.displayTitle) || '')
             const payload = { workspaceId: target.workspaceId, path: target.path, title, leaf: title }
             const actions = [{ id: 'bw-service-binding', label: bridge.label('service.choose'),
-              run: () => bridge.serviceBinding('workspace', target.workspaceId) }]
+              run: () => bridge.serviceBinding('workspace', target.workspaceId) },
+              ...bridge.boardActions(target.workspaceId)]
             if (bridge.slashes && bridge.slashes.workspace) {
               actions.push({
                 id: 'bw-move-group',
@@ -7492,6 +7506,7 @@ window.__ModuleLoader__.load({
         // null when the bind failed — the menu then uses the aligned bw copy.
         officialT,
         bindingStore,
+        workspaceBoardActions,
         readTitles,
         refreshCatalog: () => sessions.refresh(),
         // v0.32.2: the agent-preset face rides a stable GETTER, not a value.
