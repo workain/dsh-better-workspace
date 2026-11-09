@@ -180,7 +180,7 @@ test('client plugin exports the cordis plugin triple', () => {
   // rc.1 has no settingsScope and no settings.register: only
   // rc.1-guaranteed services stay in the hard inject; the settings face is
   // acquired softly through configForms inside apply.
-  assert.match(text, /inject: \['slots', 'sessions', 'workspaces', 'locale', 'uiWorkspace'\]/)
+  assert.match(text, /inject: \['slots', 'sessions', 'workspaces', 'locale', 'uiWorkspace', 'remote'\]/)
   assert.match(text, /ctx\.inject\(\['configForms'\]/)
   assert.doesNotMatch(text, /settingsScope|settings\.register/)
   assert.match(text, /async function apply\(ctx\)/)
@@ -270,7 +270,7 @@ test('v0.39.2: host title provenance, not title text, decides grouping (issue #1
   assert.doesNotMatch(text, /blankSeenRef|humanTouchedRef|TITLE_STABLE_MS|stableTick|quote-on-land/)
   assert.doesNotMatch(text, /renameSession\([^)]*[“”]/)
   assert.match(text, /const renameByUser = \(sessionId, title\) => \{/)
-  assert.equal((text.match(/renameByUser\(/g) || []).length, 8, 'exactly 8 user call sites')
+  assert.match(text, /renameSession: renameByUser/, 'group plans use the same explicit user rename adapter')
 
   // Run the two pure readers for real.
   const start = text.indexOf('const TITLE_SOURCE_KEY')
@@ -345,10 +345,11 @@ test('host half imports cleanly, registers title provenance, and survives a miss
   const plugin = await import('../src/index.js')
   assert.equal(plugin.name, 'dsh-better-workspace')
   assert.equal(typeof plugin.apply, 'function')
-  assert.deepEqual(plugin.inject, ['sessionProjections'])
+  assert.deepEqual(plugin.inject, ['sessionProjections', 'typert', 'sessionQuery', 'workspaceRegistry', 'remoteAccess'])
   let logged = ''
   const registered = []
   const ctx = {
+    plugin: () => {},
     logger: { info: (m) => { logged = String(m) } },
     sessionProjections: { register: async (definition) => { registered.push(definition); return {} } },
   }
@@ -359,9 +360,9 @@ test('host half imports cleanly, registers title provenance, and survives a miss
   assert.equal(registered[0].key, 'betterWorkspace/titleSource')
   // Registration is best-effort: without the service the row still mounts and
   // the client keeps its text fallback.
-  await plugin.apply({ logger: { info: (m) => { logged = String(m) } } })
+  await plugin.apply({ plugin: () => {}, logger: { info: (m) => { logged = String(m) } } })
   assert.match(logged, /title provenance unavailable/)
-  await plugin.apply(undefined) // must not throw without a ctx/logger
+  // Native mandatory services are enforced by Cordis before apply.
 })
 
 /**
@@ -978,7 +979,7 @@ test('view options: group/order menu + the two slash toggles (0.13.0)', () => {
   // Recency ordering is presentational: reorder anchors suppressed.
   assert.match(text, /if \(orderBy === 'updated'\) return null/)
   // alpha.2 retention contract: open goes through the navigation service.
-  assert.match(text, /open: \(sessionId\) => \{ uiWorkspace\.openSession\(sessionId\) \}/)
+  assert.match(text, /open: \(sessionId\) => uiWorkspace\.openSession\(sessionId\)/)
   assert.match(text, /mainSessionIdOf/)
 })
 
@@ -1144,18 +1145,7 @@ test('official mirror: pin/archive surface, archived filter, gates, status migra
   assert.doesNotMatch(text, /'settings\.sessionMenu/)
   assert.doesNotMatch(text, /IconEllipsisOutline16/)
   assert.doesNotMatch(text, /function WorkspaceRow\(\{ workspace, depth, count, sessionsOpen, onToggle, onStart, onMenu,/)
-  // v0.35.2 (issue #14): rename tiers, cheapest first — open rows borrow the
-  // retained binding directly, closed rows go through manager.rename ("without
-  // opening its history"), and the public sessions.using path is the
-  // last-resort fallback (slow but always legal).
-  assert.match(text, /const manager = sessions\.manager/)
-  assert.match(text, /typeof manager\.rename === 'function'/)
-  assert.match(text, /await manager\.rename\(sessionId, title\)/)
-  const tierFast = text.indexOf('const face = binding ? binding.session : undefined')
-  const tierMgr = text.indexOf('typeof manager.rename === \'function\'')
-  const tierUsing = text.indexOf('(reference) => reference.binding.session.rename(title)')
-  assert.ok(tierFast !== -1 && tierMgr !== -1 && tierUsing !== -1, 'all three rename tiers present')
-  assert.ok(tierFast < tierMgr && tierMgr < tierUsing, 'rename tier order: binding < manager < using')
+  assert.doesNotMatch(text, /sessions\.manager/, 'private rename bridge removed')
   // The view options menu rides the OFFICIAL dictionary for the filter
   // section and hides it entirely where the host lacks the keys.
   assert.match(text, /official\('filterBy\.label'\)/)
@@ -1300,29 +1290,13 @@ test('group move: user renames ride renameByUser, host reorder stays optional', 
   assert.match(body, /renameWorkspace\(target\.id, next\)/, 'workspace move is a plain rename')
   assert.match(body, /typeof insertWorkspaceBefore === 'function'/, 'host reorder action stays optional')
   assert.match(body, /renameByUser\(target\.id, next\)/, 'single session move is pinned against the auto-quote effect')
-  assert.match(body, /await renameByUser\(row\.id, next \+ row\.title\.slice\(target\.path\.length\)\)/, 'session-group batch move is pinned too')
-  assert.match(body, /for \(const w of affected\)[\s\S]*renameWorkspace\(w\.workspaceId, next \+ String\(w\.title\)\.slice\(target\.path\.length\)\)/, 'workspace-group batch move rewrites every member')
+  assert.match(body, /previewGroup\('session', target, next\)/)
+  assert.match(body, /previewGroup\('workspace', target, next\)/)
 })
 
-/**
- * Rename tiers: the public binding face for an OPEN session, the documented
- * PRIVATE BRIDGE (sessions.manager.rename) for a closed one, and the public
- * using() retention contract as the slow fallback. The private field is the
- * only way to rename a closed session without loading its whole history.
- */
-test('session rename: binding, private manager bridge, public using fallback', () => {
-  const text = clientText()
-  const start = text.indexOf('const renameSession = async (sessionId, title) =>')
-  const end = text.indexOf('const forkSession = (sessionId)')
-  assert.ok(start !== -1 && end > start, 'renameSession sits before forkSession')
-  const body = text.slice(start, end)
-  assert.match(body, /typeof sessions\.binding === 'function' \? sessions\.binding\(sessionId\) : undefined/, 'the public binding face is probed')
-  assert.match(body, /face\.rename\(title\)/, 'open sessions rename through the binding face')
-  assert.match(body, /const manager = sessions\.manager/, 'the private manager bridge is still reached')
-  assert.match(body, /typeof manager\.rename === 'function'/, 'the bridge is feature-probed')
-  assert.match(body, /sessions\.using\(/, 'the public slow path stays as fallback')
-  assert.match(body, /source: 'workspaceOperation'/, 'the fallback keeps the explicit retention source')
-  assert.match(body, /throw new Error\('session rename is unavailable on this host'\)/, 'fails loud when no contract exists')
+test('session rename uses only the public lifetime-owning adapter', () => {
+  assert.doesNotMatch(clientText(), /sessions\.manager/)
+  assert.match(read('src/client.operations.js'), /await sessions\.using/)
 })
 
 /**
@@ -1527,8 +1501,8 @@ test('declared groups: they render even with no members to project from (v0.17.0
   // ("workspaces" + a name layer = 'slash'), picker keeps its own variable.
   assert.match(text, /const treeMode = groupBy === 'workspace' && workspaceGroupMode !== 'disk'\n          \? 'slash'\n          : workspaceGroupMode\n        const built = buildTree\(items, treeMode, wsFolders, folderOrderMap\)/,
     'the main tree passes the workspace bag and the persisted group order')
-  assert.equal((text.match(/buildSessionTree\([^\n]*?(?:sessionsOf|visibleSessionsOf)\(workspace\)/g) || []).length, 4,
-    'every session-tree caller passes the session bag and its workspace scope')
+  assert.equal((text.match(/buildSessionTree\([^\n]*?(?:sessionsOf|visibleSessionsOf)\(workspace\)/g) || []).length, 2,
+    'every presentation session-tree caller passes the session bag and its workspace scope')
 })
 
 /**
@@ -2300,12 +2274,7 @@ test('v0.36.0: folder rows drag as whole groups (members retitled under the targ
   // rewritten under the target prefix.
   assert.match(text, /const commitFolderMoveInto = \(source, targetIdPath\) => \{/,
     'the commit helper exists (source passed in, not closed over)')
-  assert.match(text, /const affected = \(items \|\| \[\]\)\.filter\(\(w\) => String\(w\.title \|\| ''\)\.startsWith\(prefix\)\)/,
-    'members are swept by title prefix over all items')
-  assert.match(text, /const newSourcePath = targetPath \+ '\/' \+ sourceLeaf/,
-    'v0.36.10 nest semantics: the group lands UNDER the target as target/leaf')
-  assert.match(text, /await renameWorkspace\(w\.workspaceId, newSourcePath \+ String\(w\.title\)\.slice\(source\.path\.length\)\)/,
-    'each member is retitled target/leaf + its relative title (cannot collide with the target children)')
+  assert.match(text, /previewGroup\('workspace', \{ \.\.\.source, scope: ownerPrefixOf\(source\.idPath\) \}, newSourcePath/)
   // Dropping a group into itself, its own descendant OR its own ancestor
   // would loop or duplicate a name segment: refused at hover (no
   // preventDefault) AND again at commit (belt and braces).
@@ -2314,7 +2283,7 @@ test('v0.36.0: folder rows drag as whole groups (members retitled under the targ
   const commitCount = (text.match(/(?<!drag\.)source\.path\.startsWith\(targetPath \+ '\/'\)/g) || []).length
   assert.equal(commitCount, 1, 'the commit re-checks self/descendant/ancestor targets exactly once')
   // The namePath helper is shared by hover refusal and the commit.
-  assert.equal((text.match(/const namePathOf = \(folderIdPath\) => \{/g) || []).length, 1,
+  assert.equal((text.match(/const namePathOf = key => folderIdentityOf\(key\)\.path/g) || []).length, 1,
     'namePathOf is defined once')
   // Folder rows light up for both drop kinds — the INTO band only.
   assert.match(text, /const wsDropInto = \(path\) => \(dragMatches\('workspace'\) \|\| dragMatches\('folder'\)\) && drag\.over && drag\.over\.kind === 'folder' && drag\.over\.target === path && \(!drag\.over\.zone \|\| drag\.over\.zone === 'into'\)/,
@@ -2432,7 +2401,7 @@ test('v0.36.3/0.36.7: an ancestor row only answers the framed INTO on the DIRECT
     'self and descendant targets refuse first')
   assert.match(text, /if \(targetPath !== directParent \|\| zone !== 'into'\) \{ clearOver\('folder', idPath\); return \}/,
     'only the direct parent\'s middle band is accepted; every other ancestor refuses')
-  assert.match(text, /const cutAt = drag\.source\.path\.lastIndexOf\('\/'\)\n              const directParent = cutAt === -1 \? '' : drag\.source\.path\.slice\(0, cutAt\)/,
+  assert.match(text, /const directParent = folderIdentityOf\(drag\.source\.idPath\)\.parentPath/,
     'the direct-parent carve-out is derived from the source name path')
   assert.match(text, /const sourceSet = new Set\(sourceIds\)\n        const targetMembers = collectMemberIds\(targetNode\)\.filter\(\(id\) => !sourceSet\.has\(id\)\)/,
     'the reorder commit still filters the source block out of its anchor')
@@ -2472,7 +2441,7 @@ test('v0.36.4: group order is persisted per parent and drives the tree sort', ()
     'the commit persists the new sibling order (mixed token list)')
   assert.match(text, /const folderContainerOf = \(key\) => \{/,
     'a level is resolvable by parent key')
-  assert.match(text, /const parentKeyOf = \(folderIdPath\) => \{/,
+  assert.match(text, /const parentKeyOf = key => folderIdentityOf\(key\)\.parentKey/,
     'the parent identity helper exists')
   // The padded source row must not swallow its own target: the slot grows a
   // row by a full logical row, so the row the drag started on covers the
@@ -2629,7 +2598,7 @@ test('v0.36.5: a workspace row and a group row reorder into each other (mixed dr
   // the same-level re-check as belt and braces.
   assert.match(text, /const commitLevelReorder = \(sourceRef, targetRef, zone\) => \{/,
     'one commit serves both mixed directions')
-  assert.match(text, /const sourceToken = wsSource \? 'w:' \+ sourceRef\.source\.workspaceId : namePathOf\(sourceRef\.source\.idPath\)\.split\('\/'\)\.pop\(\)/,
+  assert.match(text, /const sourceToken = wsSource \? 'w:' \+ sourceRef\.source\.workspaceId : folderLeafOf\(sourceRef\.source\.idPath\)/,
     'the source token is a workspace id or the group leaf name')
   assert.match(text, /const containerKey = folderTarget \? parentKeyOf\(targetRef\.target\) : \(targetRef\.workspace\.levelKey \|\| ''\)/,
     'the target names the level the list is written under')
@@ -2695,9 +2664,9 @@ test('v0.36.6: a workspace lifts OUT of its group onto any same-disk level (inse
     'a cross-level workspace-row drop lifts to the target row level and anchors at that row')
   assert.match(text, /if \(anchorWorkspaceId\) \{\n          if \(zone === 'before'\) \{\n            anchor = anchorWorkspaceId/,
     'a row-anchored lift anchors at the dropped-on row')
-  assert.match(text, /insertLevelToken\(targetParentKey, 'w:' \+ source\.workspaceId, targetNamePath\.split\('\/'\)\.pop\(\), zone\)/,
+  assert.match(text, /insertLevelToken\(targetParentKey, 'w:' \+ source\.workspaceId, folderLeafOf\(targetIdPath\), zone\)/,
     'the level token lands beside the target group/token in the parent level')
-  assert.match(text, /const levelNamePath = cutAt === -1 \? targetParentKey : targetParentKey\.slice\(cutAt \+ 2\)/,
+  assert.match(text, /const levelNamePath = namePathOf\(targetParentKey\)/,
     'the target level is read back out of the idPath')
   assert.match(text, /const newTitle = levelNamePath !== '' \? levelNamePath \+ '\/' \+ source\.leaf : source\.leaf/,
     'the lifted workspace is retitled to its new level (or to a bare leaf at the root)')
@@ -2744,7 +2713,7 @@ test('v0.36.7: dropping a group on its OWN container row is the framed INTO (blo
     'the level-tail move is one shared helper')
   assert.match(text, /const containerKey = source\.levelKey \|\| ''\n        const container = folderContainerOf\(containerKey\)/,
     'the container is the level the group already lives in')
-  assert.match(text, /const token = namePathOf\(source\.idPath\)\.split\('\/'\)\.pop\(\)\n        const tokens = levelSeqOf\(container\)\.map\(levelTokenOf\)/,
+  assert.match(text, /const token = folderLeafOf\(source\.idPath\)\n        const tokens = levelSeqOf\(container\)\.map\(levelTokenOf\)/,
     'the block is identified by its level token')
   assert.match(text, /const next = tokens\.filter\(\(entry\) => entry !== token\)\n        next\.push\(token\)/,
     'the token is re-appended at the tail')
@@ -2826,10 +2795,8 @@ test('v0.36.9: a container workspace cannot be dropped inside its own disk subtr
   const text = clientText()
   // The shared judgement: resolve a drop target's disk scope down the parent
   // chain, then walk the disk parent map looking for the dragged workspace.
-  const diskScopeAt = text.indexOf('const diskScopeOf = (folderIdPath) => {')
-  assert.ok(diskScopeAt !== -1, 'a group row resolves to the disk scope that actually owns it')
-  assert.ok(text.indexOf('if (diskParentMap.has(current)) return current', diskScopeAt) !== -1,
-    'the scope walk stops at the first real workspace id')
+  assert.match(text, /const diskScopeOf = folderIdPath => folderIdentityOf\(folderIdPath\)\.ownerId/,
+    'disk ownership comes from the actual raw-tree container, including nested physical levels')
   const loopAt = text.indexOf('const isOwnDescendantScope = (diskScope, workspaceId) => {')
   assert.ok(loopAt !== -1, 'the container check walks the disk parent map')
   assert.ok(text.indexOf('if (current === workspaceId) return true', loopAt) !== -1,
@@ -2857,10 +2824,8 @@ test('v0.36.10: level-mate groups nest, lift and survive a resting drag', () => 
   // target had a child with the same leaf name (Web/Back on both sides).
   assert.match(text, /const commitFolderLift = \(source, workspace, zone\) => \{/,
     'the group lift commit exists (mirror of commitWorkspaceLift)')
-  assert.ok(text.includes("const cutAt = targetLevel.lastIndexOf('//')"),
-    'the lift cuts the target level key at the owner separator')
-  assert.ok(text.includes("const levelNamePath = cutAt === -1 ? '' : targetLevel.slice(cutAt + 2)"),
-    'the lift resolves the target level name path (disk root lifts to a plain top-level group)')
+  assert.ok(text.includes('const levelNamePath = namePathOf(targetLevel)'),
+    'the lift resolves exact raw-tree identity, including name-only nested levels')
   assert.match(text, /removeLevelToken\(source\.levelKey \|\| '', sourceLeaf\)\n            insertLevelToken\(targetLevel, sourceLeaf, 'w:' \+ workspace\.workspaceId, zone === 'after' \? 'after' : 'before'\)/,
     'the lifted group token moves to the target level anchored at the row')
   // 2) The nest commit moves the token INSIDE the target group.
@@ -2915,7 +2880,7 @@ test('v0.36.13: every tree-shaped surface shares ONE view rule (no per-surface d
     ['sidebar tree memo', /const treeMode = groupBy === 'workspace' && workspaceGroupMode !== 'disk'\s*\n\s*\? 'slash'\s*:\s*workspaceGroupMode/],
     ['sidebar rawTree', /groupBy === 'workspace' && workspaceGroupMode !== 'disk' \? 'slash' : workspaceGroupMode,/],
     ['new-group chooser treeView', /const treeView = groupBy === 'workspace-tree'\s*\n\s*\|\| \(groupBy === 'workspace' && workspaceGroupMode !== 'disk'\)/],
-    ['session picker flatMode', /const flatMode = groupBy === 'flat'\s*\n\s*\|\| \(groupBy === 'workspace' && workspaceGroupMode === 'disk'\)/],
+    ['session picker flatMode', /const flatMode = groupBy === 'flat'\s*\n\s*\|\| \(groupBy === 'workspace' && groupMode === 'disk'\)/],
   ]
   for (const [name, re] of surfaces) assert.match(text, re, name + ' must carry the shared view rule')
   assert.match(text, rule, 'the shared rule names groupBy and the name layer together')
@@ -2947,33 +2912,8 @@ test('v0.36.14: unnamed rows use the official Untitled label in every language (
   assert.doesNotMatch(body, /summary\.displayTitle/)
 })
 
-test('v0.39.1: only real subagents count as running children (issue #18)', () => {
-  const text = clientText()
-  // The reported defect: an ordinary Fork keeps parentId for lineage, so a raw
-  // parent-link walk treated the running fork as a running subagent of its
-  // idle parent. The walk must key on origin === 'subagent', and a live status
-  // must override the summary's stale running flag.
-  const start = text.indexOf('    const subagentRunningCounts =')
-  const end = text.indexOf('    /**\n     * Session nesting', start)
-  assert.ok(start !== -1 && end > start, 'subagentRunningCounts stays a self-contained helper')
-  const subagentRunningCounts = new Function(
-    text.slice(start, end) + '\nreturn subagentRunningCounts',
-  )()
-  const byId = {
-    parent: { id: 'parent', running: false },
-    sub: { id: 'sub', parentId: 'parent', origin: 'subagent', running: true },
-    nested: { id: 'nested', parentId: 'sub', origin: 'subagent', running: true },
-    fork: { id: 'fork', parentId: 'parent', running: true },
-  }
-  const counts = subagentRunningCounts(byId, new Map())
-  assert.equal(counts.get('parent'), 2, 'real subagent plus its running descendant')
-  assert.equal(counts.get('sub'), 1)
-  assert.equal(counts.get('fork'), 0, 'an ordinary fork is never a subagent child')
-  const live = new Map([['sub', { running: false }]])
-  assert.equal(subagentRunningCounts(byId, live).get('parent'), 1,
-    'live status false overrides a stale summary running flag')
-  assert.match(text, /running: \(st && st\.running !== undefined \? st\.running : summary\.running\) === true,/,
-    'row status also prefers an explicit live false')
+test('subagent counting uses the indexed production chunk', () => {
+  assert.match(clientText(), /operations\.subagentCounts\(byId, statusMap\)/)
 })
 
 test('session age filter hides old rows without archiving them', () => {

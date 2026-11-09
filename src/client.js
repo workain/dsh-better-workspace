@@ -35,6 +35,7 @@ window.__ModuleLoader__.load({
     // All dictionaries ship in the package-local chunk client.locales.js.
     // apply() awaits it once (require.async) before registering NS.
     let localeTables = null
+    let operations, serviceFeature, recoveryFeature, batchUI, planFeature, bindingStore
 
     /* ============================= helpers ============================ */
 
@@ -97,7 +98,8 @@ window.__ModuleLoader__.load({
       // paths even when they carry only one slash; drive-letter paths are
       // paths by construction. A bare "https://" is not matched (it does not
       // start with a slash).
-      const s = String(text || '').replace(/"[^"]*"|“[^”]*”/g, ' ')
+      // Mask quotes without inventing whitespace before a slash in a group.
+      const s = String(text || '').replace(/"[^"]*"|“[^”]*”/g, 'quoted')
       const re = /(?:^|\s)(?:(?:[A-Za-z]:)?\/\S+|(?:~|\.{1,2})\/\S+)/g
       let m
       while ((m = re.exec(s)) !== null) {
@@ -624,36 +626,7 @@ window.__ModuleLoader__.load({
      * ran — issue #18. The live SessionStatus wins over the summary's
      * (possibly stale) running flag, exactly like the shipped row status.
      */
-    const subagentRunningCounts = (byId, statusMap) => {
-      const children = new Map()
-      for (const id of Object.keys(byId || {})) {
-        const summary = byId[id]
-        const parentId = summary && summary.parentId
-        if (!summary || !parentId || summary.origin !== 'subagent') continue
-        let list = children.get(parentId)
-        if (!list) { list = []; children.set(parentId, list) }
-        list.push(summary)
-      }
-      const countFor = (rootId) => {
-        let count = 0
-        const queue = (children.get(rootId) || []).slice()
-        const seen = new Set([rootId])
-        while (queue.length > 0) {
-          const summary = queue.shift()
-          if (!summary || seen.has(summary.id)) continue
-          seen.add(summary.id)
-          const live = statusMap && typeof statusMap.get === 'function' ? statusMap.get(summary.id) : undefined
-          const running = live && live.running !== undefined ? live.running : summary.running
-          if (running === true) count += 1
-          const kids = children.get(summary.id)
-          if (kids) for (const kid of kids) queue.push(kid)
-        }
-        return count
-      }
-      const counts = new Map()
-      for (const id of Object.keys(byId || {})) counts.set(id, countFor(id))
-      return counts
-    }
+    const subagentRunningCounts = (byId, statusMap) => operations.subagentCounts(byId, statusMap)
 
     /**
      * Session nesting inside one workspace: same "/" convention as workspace
@@ -772,12 +745,12 @@ window.__ModuleLoader__.load({
       for (const w of list) {
         const child = normDiskPath(w.path)
         let ownerPath
-        let length = -1
-        for (const root of idByPath.keys()) {
-          if (root.length > length && child !== root && child.startsWith(root + '/')) {
-            ownerPath = root
-            length = root.length
-          }
+        // Probe path ancestors rather than scanning the entire catalog.
+        let end = child.lastIndexOf('/')
+        while (end >= 0) {
+          const prefix = child.slice(0, end)
+          if (idByPath.has(prefix)) { ownerPath = prefix; break }
+          end = end === 0 ? -1 : child.lastIndexOf('/', end - 1)
         }
         map.set(w.workspaceId, ownerPath !== undefined ? idByPath.get(ownerPath) : undefined)
       }
@@ -1010,12 +983,13 @@ window.__ModuleLoader__.load({
     const materializeChain = (chain) => chain.kind === 'ws'
       ? {
         kind: 'ws',
+        idPath: chain.idPath, scope: chain.scope,
         path: chain.path,
         workspace: { ...chain.workspace, leaf: chain.segs.join('/') + '/' + chain.pure, title: chain.workspace.title, folderPath: '' },
         folders: [],
         workspaces: [],
       }
-      : { kind: 'folder', path: chain.path, name: chain.segs.join('/'), folders: chain.folders, workspaces: chain.workspaces }
+      : { kind: 'folder', idPath: chain.idPath, scope: chain.scope, path: chain.path, name: chain.segs.join('/'), folders: chain.folders, workspaces: chain.workspaces }
 
     function compressTree(node) {
       const folders = (node.folders || []).map(compressTree)
@@ -1027,6 +1001,7 @@ window.__ModuleLoader__.load({
         const child = folders[0]
         return {
           kind: child.kind,
+          idPath: child.idPath, scope: child.scope,
           path: child.path,
           segs: [node.name].concat(child.segs || []),
           pure: child.pure,
@@ -1036,11 +1011,11 @@ window.__ModuleLoader__.load({
         }
       }
       if (folders.length === 0 && workspaces.length === 1) {
-        return { kind: 'ws', path: node.path, segs: [node.name], pure: workspaces[0].leaf, workspace: workspaces[0], folders: [], workspaces: [] }
+        return { kind: 'ws', idPath: node.idPath, scope: node.scope, path: node.path, segs: [node.name], pure: workspaces[0].leaf, workspace: workspaces[0], folders: [], workspaces: [] }
       }
       // Chain top (multiple children, or a mix): children are materialised
       // relative to this node; this node itself keeps its single name.
-      return { kind: 'folder', path: node.path, segs: [node.name], folders: folders.map(materializeChain), workspaces }
+      return { kind: 'folder', idPath: node.idPath, scope: node.scope, path: node.path, segs: [node.name], folders: folders.map(materializeChain), workspaces }
     }
 
     /* ============================== styles ============================ */
@@ -2173,7 +2148,9 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function WorkspaceRow({ workspace, depth, count, sessionsOpen, onToggle, onStart, onContextMenu, currentInside, menuOpen, dropHalf, dropInto, dragEvents, custStyle, iconMode, pulse, newSessionLabel, newSessionAria, hoverBody, dataRowKey, t }) {
+    function WorkspaceRow({ workspace, depth, count, sessionsOpen, onToggle, onOpenService, onRename, onStart, onContextMenu, currentInside, menuOpen, dropHalf, dropInto, dragEvents, custStyle, iconMode, pulse, newSessionLabel, newSessionAria, hoverBody, dataRowKey, t }) {
+      const labelTimer = React.useRef(null)
+      React.useEffect(() => () => clearTimeout(labelTimer.current), [])
       const iconEl = iconOf(iconMode, sessionsOpen)
       const iconChild = pulse
         ? E(PulseGlow, { state: pulse }, iconEl || (typeof ui.StateDot === 'function' ? E(ui.StateDot, { state: pulse, size: 10 }) : null))
@@ -2186,7 +2163,6 @@ window.__ModuleLoader__.load({
         className: cls('bw-row', 'bw-container-row', currentInside && 'bw-row-current', menuOpen && 'menu-open', dropHalf === 'before' && 'bw-slot-above', dropHalf === 'after' && 'bw-slot-below', dropInto && 'bw-drop-into', dropInto && 'bw-drop-into-strong'),
         'data-row-key': dataRowKey,
         style: { '--bw-indent': (depth * 12) + 'px', ...(custStyle || {}), ...(pulse ? { '--bw-pulse-color': PULSE_COLORS[pulse] || PULSE_COLORS.ongoing } : null) },
-        onClick: onToggle,
         onContextMenu: onContextMenu,
         role: 'treeitem',
         'aria-expanded': sessionsOpen,
@@ -2197,9 +2173,16 @@ window.__ModuleLoader__.load({
         // until hover, swapping in for the folder glyph; the arrow spins
         // open with the row; a subtree holding the current session tints
         // the folder glyph blue (folderActive), not the whole row.
-        E('span', { className: cls('bw-chevron', sessionsOpen && 'bw-chevron-open') }, E('span', { className: 'bw-arrow' }, icon('IconTriangleRightFill14', 14))),
+        E('button', { type: 'button', className: cls('bw-chevron', 'bw-tree-toggle', sessionsOpen && 'bw-chevron-open'), 'aria-label': t('service.toggle'), 'aria-expanded': sessionsOpen, onClick: e => { e.stopPropagation(); onToggle() } }, E('span', { className: 'bw-arrow' }, icon('IconTriangleRightFill14', 14))),
         E('span', { className: cls('bw-row-icon', 'bw-folder-cell', currentInside && !pulse && 'bw-folder-active') }, iconChild),
-        E('span', { className: cls('bw-row-label', pulse && custStyle && custStyle.textShadow && 'bw-pulse-text'), title: workspace.title || workspace.leaf }, workspace.leaf),
+        E('button', { type: 'button', className: cls('bw-row-label', 'bw-service-label', pulse && custStyle && custStyle.textShadow && 'bw-pulse-text'), title: workspace.title || workspace.leaf,
+          onClick: e => { e.stopPropagation(); clearTimeout(labelTimer.current); if (e.detail < 2) labelTimer.current = setTimeout(onOpenService, 500) },
+          onDoubleClick: e => { e.stopPropagation(); clearTimeout(labelTimer.current); onRename() },
+          onKeyDown: e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); clearTimeout(labelTimer.current); onOpenService() }
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); if ((e.key === 'ArrowRight') !== sessionsOpen) onToggle() }
+          },
+        }, workspace.leaf),
         count > 0 ? E('span', { className: 'bw-row-count' }, String(count)) : null,
         // The in-row ellipsis is retired (mirrors the session-row decision):
         // the ctx surface is the right-click path; hover keeps only the
@@ -3473,7 +3456,7 @@ window.__ModuleLoader__.load({
         // chooser, this picker): "workspaces" keeps the name tree whenever a
         // name layer is on — only a purely disk flat view or 'flat' collapses.
         const flatMode = groupBy === 'flat'
-          || (groupBy === 'workspace' && workspaceGroupMode === 'disk')
+          || (groupBy === 'workspace' && groupMode === 'disk')
         const isFolded = (key) => folded[key] === true
         const toggle = (key) => {
           setFolded((prev) => {
@@ -3639,7 +3622,7 @@ window.__ModuleLoader__.load({
         shippedBrowserFace, scheduleSeatReader, seatEntriesReader,
         officialT,
         presetFaceOf,
-        contextMenuFaceOf, setMenuBridge,
+        contextMenuFaceOf, setMenuBridge, bindingStore, refreshCatalog, readTitles, workspaceBoardActions,
         t,
       } = props
       // Issue #13: local reads and writes go through OUR store instance, never
@@ -3664,8 +3647,7 @@ window.__ModuleLoader__.load({
       const activeContextMenu = useActiveContextMenu(contextMenuFaceOf)
 
       if (typeof useWorkspaces !== 'function' || typeof useSessions !== 'function') {
-        console.error('[dsh-better-workspace] standard snapshot hooks missing; browser renders nothing')
-        return null
+        throw new Error('required standard snapshot hooks missing')
       }
       // useSessionAccess is a GLOBAL standard hook on rc.1. Shipped seat
       // occupants (row.action pin/archive) call it directly, so
@@ -3687,6 +3669,13 @@ window.__ModuleLoader__.load({
       // Registry-global pin set.
       const pinnedSessionIds = useWorkspaces(s => s.pinnedSessionIds) || []
       const list = useSessions(s => s)
+      const serviceSnapshot = React.useSyncExternalStore(bindingStore.subscribe, bindingStore.getSnapshot)
+      const serviceBindings = serviceSnapshot.value && serviceSnapshot.value.serviceSessions || {}
+      const batchRunner = React.useRef(null)
+      if (!batchRunner.current) batchRunner.current = operations.createRunner()
+      const mutationState = React.useRef(null)
+      mutationState.current = { items: storedItems, list, archivedSessionIds }
+
       // Unified session UI status map (running / pendingInteraction /
       // completionUnread); summary fields fill whatever it does not carry.
       const statusMap = typeof useSessionStatus === 'function' ? useSessionStatus(s => s) : null
@@ -4831,32 +4820,11 @@ window.__ModuleLoader__.load({
           return
         }
         if (target.kind === 'folder') {
-          const affected = (items || []).filter((w) => String(w.title || '').startsWith(target.path + '/'))
-          Promise.resolve()
-            .then(async () => {
-              for (const w of affected) {
-                await renameWorkspace(w.workspaceId, next + String(w.title).slice(target.path.length))
-              }
-            })
-            .then(() => setDialog(null))
-            .catch(fail)
+          previewGroup('workspace', target, next)
           return
         }
         if (target.kind === 'sgroup') {
-          const workspace = (items || []).find((w) => w.workspaceId === target.workspaceId)
-          if (!workspace) { setDialog(null); return }
-          const node = findSessionGroup(buildSessionTree(sessionsOf(workspace), sessionSlash, sessFolders, workspace.workspaceId), target.path)
-          if (!node) { setDialog(null); return }
-          const affected = collectSessionRows(node)
-          Promise.resolve()
-            .then(async () => {
-              for (const row of affected) {
-                if (row.blank) continue
-                await renameByUser(row.id, next + row.title.slice(target.path.length))
-              }
-            })
-            .then(() => setDialog(null))
-            .catch(fail)
+          previewGroup('session', target, next)
           return
         }
         setDialog(null)
@@ -5191,51 +5159,29 @@ window.__ModuleLoader__.load({
       // (commitFolderMoveInto, the drag twin of submitFolderRename).
       // Dropping a group onto itself or its own descendant would loop, so
       // the hover refuses there and the browser shows its "no drop" cursor.
-      const namePathOf = (folderIdPath) => {
-        const cutAt = folderIdPath.lastIndexOf('//')
-        return cutAt === -1 ? folderIdPath : folderIdPath.slice(cutAt + 2)
+      const folderIdentityIndex = operations.folderIdentities(rawTree, splitTitleSegs)
+      const folderIdentityOf = key => {
+        const identity = folderIdentityIndex.get(key)
+        if (!identity) throw new Error('stale-folder-identity')
+        return identity
       }
-      // idPath = [<wsId>//]*<namePath>: the owner prefix names the disk
-      // level a group renders in. Reordering only makes sense between
-      // groups of the SAME level — across levels a group's position
-      // belongs to its own container.
-      const ownerPrefixOf = (folderIdPath) => {
-        const cutAt = folderIdPath.lastIndexOf('//')
-        return cutAt === -1 ? '' : folderIdPath.slice(0, cutAt)
-      }
-      // PARENT container identity of a group row (v0.36.4) — the key its
-      // sibling order is persisted under. The ROOT level of a disk scope
-      // answers the scope prefix ('' at the top level, '<wsId>' one disk
-      // level down); a deeper group answers the idPath of its parent group.
-      const parentKeyOf = (folderIdPath) => {
-        const cutAt = folderIdPath.lastIndexOf('//')
-        const prefix = cutAt === -1 ? '' : folderIdPath.slice(0, cutAt)
-        const namePath = cutAt === -1 ? folderIdPath : folderIdPath.slice(cutAt + 2)
-        const segs = namePath.split('/')
-        segs.pop()
-        const parentNamePath = segs.join('/')
-        return parentNamePath === '' ? prefix : prefix + '//' + parentNamePath
-      }
+      const namePathOf = key => folderIdentityOf(key).path
+      const ownerPrefixOf = key => folderIdentityOf(key).scope
+      const parentKeyOf = key => folderIdentityOf(key).parentKey
+      const folderLeafOf = key => folderIdentityOf(key).leaf
+
       // v0.36.9 ANTI-LOOP. A workspace that CONTAINS the drop target's disk
       // scope may not be dropped onto it: the container would become its own
       // descendant (用户目录 → 工作 → "工作/用户目录"; the lift path even
       // rewrote the title with the raw scope id, "2d412faa…/用户目录").
-      // The disk scope behind a group row is its owner prefix resolved down
-      // the parent chain until it names a real workspace ('' — the top
-      // level — owns nothing, so sibling groups stay untouched).
-      const diskScopeOf = (folderIdPath) => {
-        let current = ownerPrefixOf(folderIdPath)
-        while (current !== '') {
-          if (diskParentMap.has(current)) return current
-          const cutAt = current.lastIndexOf('//')
-          if (cutAt === -1) return null
-          current = current.slice(0, cutAt)
-        }
-        return null
-      }
+      // The raw-tree index records the immediate physical owner. Parsing
+      // chained scope ids would incorrectly choose an outer ancestor.
+      const diskScopeOf = folderIdPath => folderIdentityOf(folderIdPath).ownerId
       const isOwnDescendantScope = (diskScope, workspaceId) => {
         let current = diskScope || ''
-        while (current !== '') {
+        const seen = new Set()
+        while (current !== '' && !seen.has(current)) {
+          seen.add(current)
           if (current === workspaceId) return true
           current = diskParentMap.get(current) || ''
         }
@@ -5269,18 +5215,7 @@ window.__ModuleLoader__.load({
       // down: a reorder slides EVERY nested workspace (prefixes untouched,
       // so sub-groups travel with the block; only the registry order
       // shifts).
-      const collectMemberIds = (folderNode) => {
-        const acc = []
-        const walk = (level) => {
-          for (const w of level.workspaces || []) acc.push(w.workspaceId)
-          for (const f of level.folders || []) {
-            if (f.kind === 'ws') acc.push(f.workspace.workspaceId)
-            else walk(f)
-          }
-        }
-        walk(folderNode)
-        return acc
-      }
+      const collectMemberIds = (folderNode) => operations.folderMembers(folderNode)
       const folderDropEvents = (idPath, path, node) => ({
         draggable: !searching,
         onDragStart: (event) => {
@@ -5369,8 +5304,7 @@ window.__ModuleLoader__.load({
             // there (leaving a parent is a title rename, not an order
             // change), and a further ancestor stays refused.
             if (targetPath !== '' && drag.source.path.startsWith(targetPath + '/')) {
-              const cutAt = drag.source.path.lastIndexOf('/')
-              const directParent = cutAt === -1 ? '' : drag.source.path.slice(0, cutAt)
+              const directParent = folderIdentityOf(drag.source.idPath).parentPath
               if (targetPath !== directParent || zone !== 'into') { clearOver('folder', idPath); return }
             }
             // Pointer in the half the open slot vacated: keep this row's slot
@@ -5463,7 +5397,7 @@ window.__ModuleLoader__.load({
         },
       })
       const nextWorkspaceAfter = (folderPath, workspaceId) => {
-        const node = findTreeNode(tree, folderPath)
+        const node = findTreeNode(rawTree, folderPath)
         if (!node) return undefined
         const index = node.workspaces.findIndex(w => w.workspaceId === workspaceId)
         return index === -1 ? undefined : (node.workspaces[index + 1] ? node.workspaces[index + 1].workspaceId : undefined)
@@ -5484,7 +5418,7 @@ window.__ModuleLoader__.load({
         const containerKey = source.levelKey || ''
         const container = folderContainerOf(containerKey)
         if (!container) { console.warn('[bw] folder move refused: target level not found', containerKey); return false }
-        const token = namePathOf(source.idPath).split('/').pop()
+        const token = folderLeafOf(source.idPath)
         const tokens = levelSeqOf(container).map(levelTokenOf)
         if (!tokens.includes(token)) { console.warn('[bw] folder move refused: group not in this level', token); return false }
         const next = tokens.filter((entry) => entry !== token)
@@ -5541,9 +5475,9 @@ window.__ModuleLoader__.load({
         setDrag(null)
         if (!canDragWorkspace) { console.warn('[bw] level reorder refused: workspace reorder unavailable on this host'); return }
         const wsSource = sourceRef.kind === 'workspace'
-        const sourceToken = wsSource ? 'w:' + sourceRef.source.workspaceId : namePathOf(sourceRef.source.idPath).split('/').pop()
+        const sourceToken = wsSource ? 'w:' + sourceRef.source.workspaceId : folderLeafOf(sourceRef.source.idPath)
         const folderTarget = targetRef.kind === 'folder'
-        const targetToken = folderTarget ? namePathOf(targetRef.target).split('/').pop() : 'w:' + targetRef.workspace.workspaceId
+        const targetToken = folderTarget ? folderLeafOf(targetRef.target) : 'w:' + targetRef.workspace.workspaceId
         const containerKey = folderTarget ? parentKeyOf(targetRef.target) : (targetRef.workspace.levelKey || '')
         const sourceLevelKey = sourceRef.source.levelKey || ''
         if (sourceLevelKey !== containerKey) { console.warn('[bw] level reorder refused: cross-level target', sourceLevelKey, containerKey); return }
@@ -5581,7 +5515,7 @@ window.__ModuleLoader__.load({
         const anchor = !sameDisk
           ? undefined
           : (half === 'after'
-            ? nextWorkspaceAfter(targetWorkspace.folderPath || '', targetWorkspace.workspaceId)
+            ? nextWorkspaceAfter(targetWorkspace.levelKey || '', targetWorkspace.workspaceId)
             : targetWorkspace.workspaceId)
         chain
           .then(() => (anchor !== undefined ? insertWorkspaceBefore(source.workspaceId, anchor) : insertWorkspaceBefore(source.workspaceId)))
@@ -5610,11 +5544,10 @@ window.__ModuleLoader__.load({
         if (!canDragWorkspace) { console.warn('[bw] workspace lift refused: workspace reorder unavailable on this host'); return }
         const targetParentKey = parentKeyOf(targetIdPath)
         if (!folderContainerOf(targetParentKey)) { console.warn('[bw] workspace lift refused: target level not found', targetParentKey); return }
-        const cutAt = targetParentKey.lastIndexOf('//')
-        const levelNamePath = cutAt === -1 ? targetParentKey : targetParentKey.slice(cutAt + 2)
+        const levelNamePath = namePathOf(targetParentKey)
         const sourceKey = source.levelKey || ''
         const targetNamePath = namePathOf(targetIdPath)
-        const targetNode = findTreeNode(rawTree, targetNamePath)
+        const targetNode = findTreeNode(rawTree, targetIdPath)
         const targetMembers = targetNode ? collectMemberIds(targetNode) : []
         const registryIds = (items || []).map((w) => w.workspaceId)
         // after = insert before whatever follows the target block in the
@@ -5645,7 +5578,7 @@ window.__ModuleLoader__.load({
             // from another level is painted beside the group that row lives in,
             // so the token to place it next to is that group's name in the
             // parent level's list (the row's own "w:" token lives one level in).
-            insertLevelToken(targetParentKey, 'w:' + source.workspaceId, targetNamePath.split('/').pop(), zone)
+            insertLevelToken(targetParentKey, 'w:' + source.workspaceId, folderLeafOf(targetIdPath), zone)
             if (sourceKey !== targetParentKey) removeLevelToken(sourceKey, 'w:' + source.workspaceId)
           })
           .catch(fail)
@@ -5655,8 +5588,7 @@ window.__ModuleLoader__.load({
         setDrag(null)
         // idPath = [<wsId>//]*<namePath>: the name path is everything after
         // the last separator.
-        const cutAt = folderIdPath.lastIndexOf('//')
-        const folderPath = cutAt === -1 ? folderIdPath : folderIdPath.slice(cutAt + 2)
+        const folderPath = namePathOf(folderIdPath)
         if (source.folderPath === folderPath) return
         const newTitle = folderPath !== '' ? folderPath + '/' + source.leaf : source.leaf
         Promise.resolve()
@@ -5664,13 +5596,7 @@ window.__ModuleLoader__.load({
           .then(() => insertWorkspaceBefore(source.workspaceId))
           .catch(fail)
       }
-      // Group drag (v0.36.0): moving a folder rewrites EVERY member's title
-      // under the target prefix — the same batch rename the rename-group
-      // dialog (submitFolderRename) performs. Titles are global name paths,
-      // so the member sweep is prefix-based over all items (same known
-      // limitation as that dialog: same-named groups on different disk
-      // levels move together). Self / descendant targets are already
-      // refused at hover time; re-checked here as belt and braces.
+      // Group drag uses the same exact scoped, confirmed plan as menu rename.
       // v0.36.10 GROUP LIFT. Dropping a group row on a cross-level
       // workspace row's EDGE band (same disk scope) means: take the whole
       // group out of its parent, give it the target level's name prefix and
@@ -5682,23 +5608,13 @@ window.__ModuleLoader__.load({
         if (!canDragWorkspace) { console.warn('[bw] folder lift refused: workspace reorder unavailable on this host'); return }
         const targetLevel = workspace.levelKey || ''
         if (targetLevel === source.idPath || targetLevel.startsWith(source.idPath + '/')) { console.warn('[bw] folder lift refused: target level inside the source', targetLevel); return }
-        const sourceLeaf = namePathOf(source.idPath).split('/').pop()
+        const sourceLeaf = folderLeafOf(source.idPath)
         // The target level's name prefix: '' = the disk root (the group
         // becomes a plain top-level group), otherwise the level key's name
         // path after the owner separator.
-        const cutAt = targetLevel.lastIndexOf('//')
-        const levelNamePath = cutAt === -1 ? '' : targetLevel.slice(cutAt + 2)
+        const levelNamePath = namePathOf(targetLevel)
         const newSourcePath = levelNamePath === '' ? sourceLeaf : levelNamePath + '/' + sourceLeaf
-        const prefix = source.path + '/'
-        const affected = (items || []).filter((w) => String(w.title || '').startsWith(prefix))
-        if (!affected.length) { console.warn('[bw] folder lift refused: no members under', source.path); return }
-        Promise.resolve()
-          .then(async () => {
-            for (const w of affected) {
-              await renameWorkspace(w.workspaceId, newSourcePath + String(w.title).slice(source.path.length))
-            }
-          })
-          .then(() => {
+        previewGroup('workspace', { ...source, scope: ownerPrefixOf(source.idPath) }, newSourcePath, () => {
             removeLevelToken(source.levelKey || '', sourceLeaf)
             insertLevelToken(targetLevel, sourceLeaf, 'w:' + workspace.workspaceId, zone === 'after' ? 'after' : 'before')
             // Carry the group's own member order across to its NEW level
@@ -5709,8 +5625,7 @@ window.__ModuleLoader__.load({
               const newKey = owner === '' ? newSourcePath : owner + '//' + newSourcePath
               if (newKey !== source.idPath) actions.setFolderOrder(newKey, levelSeqOf(oldContainer).map(levelTokenOf))
             }
-          })
-          .catch(fail)
+        })
       }
       const commitFolderMoveInto = (source, targetIdPath) => {
         setDrag(null)
@@ -5719,15 +5634,11 @@ window.__ModuleLoader__.load({
         // in. The hover already showed the framed INTO there, so "放进那个
         // 组" means "move to the end of that group" — no rename involved.
         // Checked BEFORE the ancestor refusal below.
-        const cutAt = source.path.lastIndexOf('/')
-        const directParent = cutAt === -1 ? '' : source.path.slice(0, cutAt)
+        const directParent = folderIdentityOf(source.idPath).parentPath
         if (targetPath === directParent) { moveFolderToLevelEnd(source); return }
         // An ANCESTOR target means the group already lives there: a prefix
         // rewrite would duplicate a segment (工作/A → 工作/工作/A). Refuse.
         if (source.path === targetPath || targetPath.startsWith(source.path + '/') || (targetPath !== '' && source.path.startsWith(targetPath + '/'))) { console.warn('[bw] folder move refused: target is self, descendant or ancestor of', source.path); return }
-        const prefix = source.path + '/'
-        const affected = (items || []).filter((w) => String(w.title || '').startsWith(prefix))
-        if (!affected.length) { console.warn('[bw] folder move refused: no members under', source.path); return }
         // v0.36.10 NEST semantics: the group keeps its identity UNDER the
         // target (工作/平行帮 → 工作/Fis管理后台/平行帮). The old prefix
         // swap merged the members straight into the target's own level —
@@ -5736,15 +5647,9 @@ window.__ModuleLoader__.load({
         // anything moved: the "平级的没法拖动" report. Nesting names every
         // member BELOW the moved group, which cannot collide with the
         // target's direct children.
-        const sourceLeaf = namePathOf(source.idPath).split('/').pop()
+        const sourceLeaf = folderLeafOf(source.idPath)
         const newSourcePath = targetPath + '/' + sourceLeaf
-        Promise.resolve()
-          .then(async () => {
-            for (const w of affected) {
-              await renameWorkspace(w.workspaceId, newSourcePath + String(w.title).slice(source.path.length))
-            }
-          })
-          .then(() => {
+        previewGroup('workspace', { ...source, scope: ownerPrefixOf(source.idPath) }, newSourcePath, () => {
             // The group token moves from the source's level to INSIDE the
             // target group, and the member order follows to the new key.
             removeLevelToken(source.levelKey || '', sourceLeaf)
@@ -5760,14 +5665,14 @@ window.__ModuleLoader__.load({
               const newKey = owner === '' ? newSourcePath : owner + '//' + newSourcePath
               if (newKey !== source.idPath) actions.setFolderOrder(newKey, levelSeqOf(oldContainer).map(levelTokenOf))
             }
-          })
+        })
           // (v0.36.4) NO automatic expand after a move-into. v0.36.3 opened
           // the target group here so the move would be visible, but on the
           // real tree a drop in the middle band is exactly the "变下级"
           // gesture, and auto-opening made that read as "又被撑开了".
           // The row the user just dropped into stays as it was; the moved
           // members appear under it once the user opens that group.
-          .catch(fail)
+
       }
       // Group REORDER (v0.36.0): a name group's position IS the registry
       // order of its members, so reordering = sliding the whole member
@@ -5812,21 +5717,22 @@ window.__ModuleLoader__.load({
         // drop is visible immediately, then sync the registry for the
         // workspace order other surfaces read.
         const orderParent = parentKeyOf(source.idPath)
-        const sourceName = namePathOf(source.idPath).split('/').pop()
-        const targetName = namePathOf(targetIdPath).split('/').pop()
+        const sourceName = folderLeafOf(source.idPath)
+        const targetName = folderLeafOf(targetIdPath)
         // v0.36.5: write the MIXED token list (group names + w:<id> tokens),
         // not just the folder names — a level that already interleaves a bare
         // workspace with its groups must keep those workspace positions.
-        writeLevelOrder(orderParent, sourceName, targetName, zone)
-        Promise.resolve()
-          .then(async () => {
-            if (anchor === undefined) {
-              for (const id of sourceIds) await insertWorkspaceBefore(id)
-            } else {
-              for (const id of sourceIds) await insertWorkspaceBefore(id, anchor)
-            }
+        try {
+          const freshSource = operations.findFolder(rawTree, source.idPath)
+          const exactIds = freshSource && collectMemberIds(freshSource)
+          if (!exactIds || JSON.stringify(exactIds) !== JSON.stringify(sourceIds)) throw new Error('stale-membership')
+          const prepared = operations.orderPlan({ ids: sourceIds, anchor,
+            state: () => mutationState.current.items, write: insertWorkspaceBefore, runner: batchRunner.current,
+            describe: (title, beforeId) => title + ' · ' + (beforeId ? t('batch.orderBefore') + ' ' + beforeId : t('batch.orderEnd')),
+            afterSuccess: () => writeLevelOrder(orderParent, sourceName, targetName, zone),
           })
-          .catch(fail)
+          setDialog({ kind: 'batch-plan', ...prepared })
+        } catch { setErrorText(t('batch.stale')) }
       }
 
       /* ---------------------- session drag & drop --------------------- */
@@ -6038,64 +5944,48 @@ window.__ModuleLoader__.load({
           .catch(fail)
       }
 
-      /** Rename one session sub-group: rewrite the title prefix of every member. */
+      // Shared planner for menu, rename and whole-group drag operations.
+      const plannerState = React.useRef(null)
+      plannerState.current = { rawTree, wsFolders, sessFolders }
+      const planner = planFeature.createPlanner({
+        operations, state: () => mutationState.current, tree: () => plannerState.current.rawTree,
+        split: splitTitleSegs, buildSessions: buildSessionTree, findSessions: findSessionGroup,
+        collectSessions: collectSessionRows, allowed: groupsAllowedFor, runner: batchRunner.current,
+        renameWorkspace, renameSession: renameByUser, readTitles,
+        declarations: (kind, scope) => ((kind === 'workspace' ? plannerState.current.wsFolders : plannerState.current.sessFolders)[scope] || []),
+        updateDeclarations: (kind, scope, oldPath, nextPath, declared) => {
+          const prefix = splitTitleSegs(oldPath)
+          const paths = declared.filter(path => {
+            const parts = splitTitleSegs(path)
+            return prefix.every((part, i) => parts[i] === part)
+          })
+          if (paths.length) {
+            actions.removeFolder(kind, scope, oldPath)
+            for (const path of paths) {
+              const suffix = splitTitleSegs(path).slice(prefix.length)
+              actions.addFolder(kind, scope, [...splitTitleSegs(nextPath), ...suffix].join('/'))
+            }
+          }
+        },
+      })
+      const previewGroup = async (kind, target, nextPath, afterSuccess) => {
+        if (batchRunner.current.busy) { setErrorText(t('batch.busy')); return }
+        try {
+          const prepared = await planner.prepareWithTitles(kind, target, nextPath, afterSuccess)
+          setDialog({ kind: 'batch-plan', ...prepared })
+        } catch { setErrorText(t('batch.stale')) }
+      }
       const submitSessionGroupRename = (target, rawName) => {
         const name = normPath(rawName)
-        if (name === '') { setErrorText(t('folder.error.empty')); return }
-        if (name === target.name) { setDialog(null); return }
-        const workspace = (items || []).find(w => w.workspaceId === target.workspaceId)
-        if (!workspace) { setDialog(null); return }
-        const node = findSessionGroup(buildSessionTree(sessionsOf(workspace), sessionSlash, sessFolders, workspace.workspaceId), target.path)
-        if (!node) { setDialog(null); return }
-        const parentPath = target.path.includes('/') ? target.path.slice(0, target.path.lastIndexOf('/')) : ''
-        const nextPath = parentPath !== '' ? parentPath + '/' + name : name
-        const affected = collectSessionRows(node)
-        Promise.resolve()
-          .then(async () => {
-            for (const row of affected) {
-              if (row.blank) continue
-              const nextTitle = nextPath + row.title.slice(target.path.length)
-              await renameByUser(row.id, nextTitle)
-            }
-          })
-          .then(() => setDialog(null))
-          .catch(fail)
+        if (!name) { setErrorText(t('folder.error.empty')); return }
+        const parts = splitTitleSegs(target.path)
+        previewGroup('session', target, [...parts.slice(0, -1), ...splitTitleSegs(name)].join('/'))
       }
-
-      const findTreeNode = (node, path) => {
-        if (path !== '' && node.path === path) return node
-        for (const folder of node.folders) {
-          const hit = findTreeNode(folder, path)
-          if (hit) return hit
-        }
-        for (const w of node.workspaces || []) {
-          if (w.sub) {
-            const hit = findTreeNode(w.sub, path)
-            if (hit) return hit
-          }
-        }
-        return null
-      }
-
-      const submitFolderRename = (oldPath, rawPath) => {
-        const newPath = normPath(rawPath)
-        if (newPath === '') { setErrorText(t('folder.error.empty')); return }
-        if (newPath === oldPath) { setDialog(null); return }
-        const node = findTreeNode(tree, oldPath)
-        const hasChildren = node ? countWorkspaces(node) > 0 : false
-        const prefix = oldPath + '/'
-        const affected = hasChildren
-          ? (items || []).filter(w => String(w.title || '').startsWith(prefix))
-          : []
-        Promise.resolve()
-          .then(async () => {
-            for (const w of affected) {
-              const nextTitle = newPath + String(w.title).slice(oldPath.length)
-              await renameWorkspace(w.workspaceId, nextTitle)
-            }
-          })
-          .then(() => setDialog(null))
-          .catch(fail)
+      const findTreeNode = (node, identity) => operations.findFolder(node, identity)
+      const submitFolderRename = (target, rawPath) => {
+        const nextPath = normPath(rawPath)
+        if (!nextPath) { setErrorText(t('folder.error.empty')); return }
+        previewGroup('workspace', target, nextPath)
       }
 
       /* ---------------------------- rows ----------------------------- */
@@ -6225,6 +6115,17 @@ window.__ModuleLoader__.load({
           count,
           sessionsOpen: searching ? true : sessionsOpenOf(workspace.workspaceId),
           currentInside: wsHasCurrent(workspace),
+          onOpenService: async () => {
+            if (phase !== 'ready' || !list || list.phase !== 'ready') { setErrorText(t('service.loading')); return }
+            const target = serviceFeature.resolve(workspace, serviceBindings[workspace.workspaceId], list && list.byId, archivedSet)
+            if (!target.id) { setDialog({ kind: 'service-binding', workspace }); return }
+            try {
+              const rows = await readTitles(workspace.workspaceId, [target.id])
+              if (rows.length !== 1 || rows[0].id !== target.id || !rows[0].eligible) throw new Error('unavailable')
+              open(target.id) // rc.1 returns void; later navigation errors belong to the native shell.
+            } catch { setErrorText(t('service.openError')) }
+          },
+          onRename: () => setDialog({ kind: 'ws-rename', workspace }),
           onToggle: () => { if (!searching) actions.setSessionsExpanded(workspace.workspaceId, !sessionsOpenOf(workspace.workspaceId)) },
           // Starting a session force-expands the workspace row: the user must
           // SEE the new session appear, even if the row was collapsed.
@@ -6499,6 +6400,7 @@ window.__ModuleLoader__.load({
             icon: icon('IconCopyOutlineRegular', 16),
           }] : []),
           { type: 'separator', id: 'bw-sep' },
+          { id: 'service-binding', label: t('service.choose') },
           ...sessionUngroupItems,
           ...sgroupItems,
           customizeEntry,
@@ -6638,6 +6540,8 @@ window.__ModuleLoader__.load({
           submenu: options.map((option) => ({ id: option.id, label: option.label })),
         }]
       }
+      const boardActions = (workspaceId) => typeof workspaceBoardActions === 'function'
+        ? workspaceBoardActions(workspaceId, t, fail) : []
       const menuEntries = () => {
         if (ctx === null) return []
         const customizeEntry = { id: 'customize', label: t('custom.title'), icon: icon('IconPersonalizationOutline16', 16) }
@@ -6667,6 +6571,8 @@ window.__ModuleLoader__.load({
           customizeEntry,
         ]
         if (ctx.kind === 'workspace') return [
+          { id: 'service-binding', label: t('service.choose') },
+          ...boardActions(ctx.payload.workspaceId),
           { id: 'rename', label: ot ? ot('rename') : t('menu.rename'), icon: icon('IconEditOutline16', 16) },
           { id: 'delete', label: ot ? ot('delete.workspace') : t('menu.delete'), icon: icon('IconTrashOutline16', 16), danger: true },
           { type: 'separator', id: 'bw-sep' },
@@ -6717,16 +6623,28 @@ window.__ModuleLoader__.load({
           }
           return
         }
+        if (kind === 'workspace' && (id === 'bw-board-open' || id === 'bw-board-configure')) {
+          const action = boardActions(payload.workspaceId).find(action => action.id === id)
+          if (action) action.run()
+          else fail(t('board.failed'))
+          return
+        }
+        if (id === 'service-binding') {
+          const workspace = kind === 'workspace' ? (items || []).find(w => w.workspaceId === payload.workspaceId)
+            : (items || []).find(w => (w.sessionIds || []).includes(payload.id))
+          if (workspace) setDialog({ kind: 'service-binding', workspace, initialSessionId: kind === 'session' ? payload.id : undefined })
+          return
+        }
         if (id === 'move-group') {
           // Lock the clicked row as the dialog target; the group name starts
           // at its CURRENT prefix so "retype to move elsewhere" is one edit.
-          const target = kind === 'folder' ? { kind: 'folder', path: payload.path, title: payload.path }
+          const target = kind === 'folder' ? { kind: 'folder', path: payload.path, title: payload.path, idPath: payload.idPath, scope: payload.scope }
             : kind === 'workspace' ? { kind: 'workspace', id: payload.workspaceId, title: payload.title || payload.leaf }
               : kind === 'session' ? { kind: 'session', id: payload.id, title: payload.title, allowGroups: payload.allowGroups !== false }
                 : { kind: 'sgroup', path: payload.path, title: payload.path, workspaceId: payload.workspaceId }
           setDialog({ kind: 'group-move', target, initial: target.allowGroups === false ? '' : groupPrefixOf(target.title), groupPaths: collectGroupPaths(target.kind) })
         }
-        else if (kind === 'folder' && id === 'rename-folder') setDialog({ kind: 'folder-rename', path: payload.path })
+        else if (kind === 'folder' && id === 'rename-folder') setDialog({ kind: 'folder-rename', target: payload })
         else if (kind === 'folder' && id === 'delete-folder') setDialog({ kind: 'folder-delete', path: payload.path, scope: payload.scope, name: payload.name })
         else if (kind === 'sgroup' && id === 'delete-sgroup') setDialog({ kind: 'sgroup-delete', target: payload })
         else if (kind === 'workspace' && id === 'rename') setDialog({ kind: 'ws-rename', workspace: payload })
@@ -6745,6 +6663,11 @@ window.__ModuleLoader__.load({
       // The effect republishes after every render: slash switches, the preset
       // face and the current session inventory all feed availability.
       const menuBridgeValue = {
+        boardActions,
+        serviceBinding: (kind, id) => {
+          const workspace = (items || []).find(w => kind === 'workspace' ? w.workspaceId === id : (w.sessionIds || []).includes(id))
+          if (workspace) setDialog({ kind: 'service-binding', workspace, initialSessionId: kind === 'session' ? id : undefined })
+        },
         slashes: { session: sessionSlash, workspace: workspaceSlash },
         hasPreset: () => !!presetFace,
         groupPrefix: (title) => groupPrefixOf(title),
@@ -6797,6 +6720,14 @@ window.__ModuleLoader__.load({
 
       const dialogElement = (() => {
         if (dialog === null) return null
+        if (dialog.kind === 'service-binding') return E(serviceFeature.Picker, {
+          store: bindingStore, MenuPicker, initialSessionId: dialog.initialSessionId, workspace: (items || []).find(w => w.workspaceId === dialog.workspace.workspaceId) || { workspaceId: dialog.workspace.workspaceId, sessionIds: [] },
+          byId: list && list.byId, archived: archivedSet, titleOf: (id, summary) => rowTitleOf(id, summary, false), t, onClose: () => setDialog(null),
+        })
+        if (dialog.kind === 'batch-plan') return E(batchUI.BatchDialog, {
+          key: 'batch-' + dialog.plan.key, plan: dialog.plan, run: dialog.run,
+          reconcile: refreshCatalog, onClose: () => setDialog(null), t,
+        })
         if (dialog.kind === 'ws-rename') return E(TextDialog, {
           key: 'ws-rename',
           title: t('ws.rename.title'),
@@ -6878,8 +6809,8 @@ window.__ModuleLoader__.load({
           key: 'folder-rename',
           title: t('folder.rename.title'),
           hint: t('folder.rename.hint'),
-          initial: dialog.path,
-          onConfirm: (v) => submitFolderRename(dialog.path, v),
+          initial: dialog.target.path,
+          onConfirm: (v) => submitFolderRename(dialog.target, v),
           onClose: () => setDialog(null),
           t,
         })
@@ -7258,6 +7189,22 @@ window.__ModuleLoader__.load({
         console.warn('[dsh-better-workspace] style chunk failed to load', styleChunkError)
       }
 
+      operations = await require.async('./client.operations.js')
+      serviceFeature = await require.async('./client.service.js')
+      recoveryFeature = await require.async('./client.recovery.js')
+      batchUI = await require.async('./client.batch-ui.js')
+      planFeature = await require.async('./client.plans.js')
+      const boardFeature = await require.async('./client.board.js')
+      const workspaceBoardActions = (workspaceId, label, failed) => boardFeature.actions(
+        () => ctx.get('workspaceBoard'), workspaceId, label, failed)
+      const titlesFeature = await require.async('./client.titles.js')
+      const readTitles = await titlesFeature.mount(ctx)
+      bindingStore = serviceFeature.createBindingStore(async (workspaceId, id) => {
+        const rows = await readTitles(workspaceId, [id])
+        return rows.length === 1 && rows[0].id === id && rows[0].eligible
+      })
+      const restoration = recoveryFeature.createRestoration()
+
       const slots = ctx.get('slots')
       if (slots === undefined || typeof slots.register !== 'function') {
         console.error('[dsh-better-workspace] slots service unavailable; plugin idle')
@@ -7411,7 +7358,8 @@ window.__ModuleLoader__.load({
             const bridge = menuBridge
             if (!bridge) return []
             const title = String((target && target.displayTitle) || '')
-            const actions = []
+            const actions = [{ id: 'bw-service-binding', label: bridge.label('service.choose'),
+              run: () => bridge.serviceBinding('session', target.sessionId) }]
             if (bridge.slashes && bridge.slashes.session) {
               actions.push({
                 id: 'bw-move-group',
@@ -7444,7 +7392,9 @@ window.__ModuleLoader__.load({
             if (!bridge) return []
             const title = String((target && target.displayTitle) || '')
             const payload = { workspaceId: target.workspaceId, path: target.path, title, leaf: title }
-            const actions = []
+            const actions = [{ id: 'bw-service-binding', label: bridge.label('service.choose'),
+              run: () => bridge.serviceBinding('workspace', target.workspaceId) },
+              ...bridge.boardActions(target.workspaceId)]
             if (bridge.slashes && bridge.slashes.workspace) {
               actions.push({
                 id: 'bw-move-group',
@@ -7544,55 +7494,8 @@ window.__ModuleLoader__.load({
         if (!result || !result.ok) throw new Error(result && result.error ? result.error.message : 'session search failed')
         return result.value
       }
-      // Rename performance (issue #14): sessions.using retains the session and
-      // awaits reference.ready FIRST, so renaming a closed 5MB row stalled ~6s
-      // loading its whole history just to send a 20ms rename RPC (the rename
-      // itself is independent of the transcript). Tiered, cheapest first:
-      //
-      // 1. Open session → borrow binding directly. binding(id) only sees
-      //    retained scopes, so "a binding comes back" IS the open test. Same
-      //    SessionBinding object the using path borrows, so title projection
-      //    and list refresh behave exactly the same.
-      // 2. Closed session → PRIVATE BRIDGE: sessions.manager.rename(id, title)
-      //    is "Rename a Session ... without opening its history"
-      //    (manager.ts:578). `manager` is a TS-private field of ClientSessions
-      //    (service.d.ts:105), not part of ISessions; it is reachable at
-      //    runtime, so this tier is feature-probed. It is kept because the
-      //    public using() path below loads the whole history first (multi-second
-      //    on a large closed session). This is the plugin's ONLY private-API
-      //    reach; if the host ever stops exposing the field, tier 3 still
-      //    renames correctly (just slower).
-      // 3. Fallback → sessions.using with an explicit source: public, but slow
-      //    (loads history). Then fail loud.
-      // Fork and open go through the uiWorkspace navigation service: ISessions
-      // no longer carries open() at all (navigation belongs to the view owner,
-      // replaceMain).
-      const renameSession = async (sessionId, title) => {
-        const fail = (result) => new Error(result && result.error ? result.error.message : 'session rename failed')
-        const binding = typeof sessions.binding === 'function' ? sessions.binding(sessionId) : undefined
-        const face = binding ? binding.session : undefined
-        if (face && typeof face.rename === 'function') {
-          const result = await face.rename(title)
-          if (!result || !result.ok) throw fail(result)
-          return
-        }
-        const manager = sessions.manager
-        if (manager && typeof manager.rename === 'function') {
-          const result = await manager.rename(sessionId, title)
-          if (!result || !result.ok) throw fail(result)
-          return
-        }
-        if (typeof sessions.using === 'function') {
-          const result = await sessions.using(
-            sessionId,
-            { source: 'workspaceOperation' },
-            (reference) => reference.binding.session.rename(title),
-          )
-          if (!result || !result.ok) throw fail(result)
-          return
-        }
-        throw new Error('session rename is unavailable on this host')
-      }
+      // Public rc.1 adapter owns a reference until rename settles.
+      const renameSession = (sessionId, title) => operations.renameSession(sessions, sessionId, title)
       const forkSession = (sessionId) => {
         uiWorkspace.forkSession(sessionId)
           .catch(() => { /* keep current selection */ })
@@ -7602,6 +7505,10 @@ window.__ModuleLoader__.load({
         // Official 'workspace' dictionary translate (menu copy follows upstream);
         // null when the bind failed — the menu then uses the aligned bw copy.
         officialT,
+        bindingStore,
+        workspaceBoardActions,
+        readTitles,
+        refreshCatalog: () => sessions.refresh(),
         // v0.32.2: the agent-preset face rides a stable GETTER, not a value.
         // The slot renderer caches the inject result per StoredEntry
         // (ui-renderer scoped-slots rootInjectCache), so a value prop would
@@ -7660,7 +7567,7 @@ window.__ModuleLoader__.load({
           }
         },
         startSession: (workspaceId) => { uiWorkspace.startSession(workspaceId) },
-        open: (sessionId) => { uiWorkspace.openSession(sessionId) },
+        open: (sessionId) => uiWorkspace.openSession(sessionId),
         searchSessions,
         searchResultLimit: sessions.searchResultLimit !== undefined ? sessions.searchResultLimit : 20,
         renameSession,
@@ -7719,7 +7626,11 @@ window.__ModuleLoader__.load({
       // plugin fiber — the whole web boot is all-or-nothing.
       const guarded = (slotKey, options, component) => () => {
         try {
-          return slots.register(options, (props) => E(QuietBoundary, null, E(component, props)))
+          const dispose = slots.register(options, (props) => E(recoveryFeature.RootBoundary, {
+            t: props.t, restore: () => restoration.restore(),
+          }, E(component, props)))
+          restoration.add(dispose)
+          return dispose
         } catch (registerError) {
           console.warn('[dsh-better-workspace] register skipped for ' + slotKey, registerError)
           return undefined
@@ -7784,6 +7695,8 @@ window.__ModuleLoader__.load({
               const forms = fctx && fctx.configForms
               if (forms && typeof forms.get === 'function') {
                 prefsScopeRef = forms.get('better-workspace')
+                bindingStore.attach(prefsScopeRef)
+                fctx.effect(() => () => bindingStore.attach(null))
               }
             } catch (error) {
               console.warn('[dsh-better-workspace] configForms acquisition failed', error)
@@ -7878,7 +7791,7 @@ window.__ModuleLoader__.load({
       // bundle forever). 'remote' + 'remote.agentPresets' are acquired SOFTLY
       // inside apply: a synchronous probe plus a ctx.inject child fiber that
       // waits for their ACTIVE transition (see the agent-preset face block).
-      inject: ['slots', 'sessions', 'workspaces', 'locale', 'uiWorkspace'],
+      inject: ['slots', 'sessions', 'workspaces', 'locale', 'uiWorkspace', 'remote'],
       apply,
     }
   },
