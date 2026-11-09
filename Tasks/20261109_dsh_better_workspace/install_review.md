@@ -1,6 +1,6 @@
 # Артефакт, зависимости и откат
 
-Подготовка ограничена локальным `npm pack --ignore-scripts`. Версия форка: `0.41.0-workain.1` в package и plugin manifest; package identity, ModuleLoader id, ключи локальных хранилищ и MIT сохранены. Репозиторий, homepage и bugs указывают на Workain. Публикация, теги и установка не выполнялись.
+Подготовка ограничена локальным `npm pack --ignore-scripts`. Версия форка: `0.41.0-workain.1` в package и plugin manifest; package identity, ModuleLoader id, ключи локальных хранилищ и MIT сохранены. Репозиторий, homepage и bugs указывают на Workain. Публикация в npm, теги и установка не выполнялись. Пакет `dsh-better-workspace@latest` из публичного npm — upstream, а не этот форк; для доработок Workain нужен именно проверенный tarball или точный commit форка. Не использовать плавающий upstream/latest и не включать одновременно две копии одного плагина.
 
 Runtime: единственная добавленная peer-зависимость — официальный `@deepseek-ai/dsh-typert-protocol` той же версии 0.2.2-rc.1. Существующие zod и schemastery используются на host-стороне; синхронные клиентские require остаются в исходном whitelist. React/react-dom/jsdom — только dev-зависимости для исполнения DOM-проверок. В тестовой среде использованы уже установленные SDK-модули без загрузки или запуска install-скриптов.
 
