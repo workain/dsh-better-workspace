@@ -3,6 +3,14 @@
 > 倒序排列,新版本条目在最上面。条目格式:`## vX.Y.Z — YYYY-MM-DD` + 类型(feat / fix / docs / chore)+ 要点 + 相关链接。
 > 纪律见 AGENTS.md「变更记录纪律」:发版前先更新本文件并随版本提交;事故复盘、复现与真机验证记录也记在这里。
 
+## UNRELEASED — Workain fork
+
+- feat: explicit managing-session assignment in native profile settings; separate workspace label navigation and expansion control.
+- fix: scope group mutations by exact tree identity and complete underlying membership; preview sequential writes and report partial/unknown outcomes without automatic retries.
+- fix: preserve quoted group segments, nested name-only parent keys and immediate physical ownership during moves; keep the hero picker functional across all view modes.
+- fix: use public rc.1 session rename lifetime and indexed subagent aggregation; provide recovery to the original stock slot owner.
+- chore: retain upstream MIT attribution, package/storage identity and rc.1-only baseline; add package-local chunks and synthetic behavior/integration fixtures. No upstream release or production installation.
+
 ## v0.41.0 — 2026-11-07
 
 **类型**:feat(新增「隐藏较早会话」纯视图过滤,整理自 PR #21)

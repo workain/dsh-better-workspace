@@ -48,14 +48,25 @@ export const Config = Schema === null
     statusPulse: Schema.boolean().default(true).volatile(),
     styling: Schema.dict(Schema.any()).default({}).volatile(),
     appearance: Schema.dict(Schema.any()).default({}).volatile(),
+    // Explicit assignments are shared by browsers through native profile settings.
+    serviceSessions: Schema.dict(Schema.string()).default({}).volatile(),
   })
 
-export const inject = ['sessionProjections']
+export const inject = ['sessionProjections', 'typert', 'sessionQuery', 'workspaceRegistry', 'remoteAccess']
 
 export async function apply(ctx) {
   const log = ctx && ctx.logger && typeof ctx.logger.info === 'function'
     ? (msg) => ctx.logger.info(msg)
     : (msg) => console.log(msg)
+  // Keep peer resolution lazy as required by the no-build host entry. A
+  // profile without resolvable protocol peers still loads the original host
+  // projection; service navigation/bulk title reads remain unavailable.
+  try {
+    const { WorkspaceTitleReader } = await import('./title-bridge.js')
+    ctx.plugin(WorkspaceTitleReader)
+  } catch {
+    log('[dsh-better-workspace] passive title bridge unavailable')
+  }
   const registered = await registerTitleSource(ctx, log)
   log('[dsh-better-workspace] host half loaded; UI runs in the browser (client half)'
     + (registered ? '; session title provenance projection registered' : '; title provenance unavailable'))
