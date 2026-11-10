@@ -3,6 +3,12 @@
 > 倒序排列,新版本条目在最上面。条目格式:`## vX.Y.Z — YYYY-MM-DD` + 类型(feat / fix / docs / chore)+ 要点 + 相关链接。
 > 纪律见 AGENTS.md「变更记录纪律」:发版前先更新本文件并随版本提交;事故复盘、复现与真机验证记录也记在这里。
 
+## v0.41.0-workain.3 — 2026-11-10 (candidate)
+
+- feat: four owner-trusted agent tools discover workspaces, read complete session groups, move explicit sessions and rename/move exact nested groups in the explicitly selected workspace without a mandatory confirmation dialog.
+- safety: authoritative passive reads, provenance/quote/path roundtrip validation, blank/subagent exclusions, full archived membership, per-workspace serialization and bounded operation replay ledger. Unknown writes stop and fence this workspace for the host lifetime; no automatic retry or rollback.
+- test: native registered Tools executor plus Chromium proves passive reads do not activate Agents, public rename sends no prompt/unarchive, own/other-workspace selection is explicit and a resulting group is visible. Host grammar is a parity-enforced extraction of the canonical checked-in client parser, not a separate naive slash parser.
+
 ## v0.41.0-workain.2 — 2026-11-09 (candidate, not installed)
 
 - feat: optional board-owned workspace menu actions for opening/configuring that workspace's default board; managing-session clicks and expansion remain unchanged. No Harness-wide default board.

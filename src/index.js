@@ -67,6 +67,13 @@ export async function apply(ctx) {
   } catch {
     log('[dsh-better-workspace] passive title bridge unavailable')
   }
+  // Tools are optional: absence must never disable the existing sidebar.
+  try {
+    ctx.plugin({ name: 'better-workspace-group-tools', inject: ['tools', 'sessionController'], async apply(child) {
+      const { registerGroupTools } = await import('./group-tools.js')
+      child.effect(() => registerGroupTools(child))
+    } })
+  } catch { log('[dsh-better-workspace] grouping tools unavailable') }
   const registered = await registerTitleSource(ctx, log)
   log('[dsh-better-workspace] host half loaded; UI runs in the browser (client half)'
     + (registered ? '; session title provenance projection registered' : '; title provenance unavailable'))

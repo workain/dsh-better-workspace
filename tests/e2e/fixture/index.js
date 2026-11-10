@@ -5,6 +5,8 @@ import { resolve, join } from 'node:path'
 export const name = 'bw-tree-fixture'
 export const inject = ['sessions','workspaceRegistry','sessionProjections','sessionPersistence']
 export async function apply(ctx, config) {
+  const groups = await import('./groups.js')
+  ctx.plugin(groups)
   ctx.plugin(FixtureObservation)
   // Fail closed unless the runner provides its fresh, isolated fixture root.
   const root=resolve(config.root)

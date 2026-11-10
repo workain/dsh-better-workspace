@@ -256,7 +256,7 @@ def main():
     profile = home / '.dsh/profiles/web'; profile.mkdir(parents=True)
     link_modules(sdk, profile / 'node_modules')
     package = profile / 'node_modules/dsh-better-workspace'; package.mkdir()
-    artifact = REPO / 'dsh-better-workspace-0.41.0-workain.1.tgz'
+    artifact = Path(os.environ['BW_ARTIFACT']).resolve() if os.environ.get('BW_ARTIFACT') else REPO / ('dsh-better-workspace-' + json.loads((REPO/'package.json').read_text())['version'] + '.tgz')
     with tarfile.open(artifact) as tar:
         for member in tar.getmembers():
             assert member.name.startswith('package/') and '..' not in Path(member.name).parts
