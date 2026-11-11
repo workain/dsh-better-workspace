@@ -3963,6 +3963,12 @@ window.__ModuleLoader__.load({
       // renames (renameByUser forgets the display) always stand verbatim.
       const rememberedDisplayOf = (id) => (remembered[id] && typeof remembered[id].display === 'string' ? remembered[id].display : undefined)
       const rowTitleOf = (id, summary, graftedOn) => {
+        const source = summary && summary.projectionValues && typeof summary.projectionValues === 'object'
+          ? summary.projectionValues[TITLE_SOURCE_KEY] : undefined
+        // Native grouping writes a user title. Never let a previous provider
+        // display fallback resurrect the old group after the authoritative
+        // root title arrives from the wire.
+        if (source === 'user') return sessionTitleOf(summary, t)
         if (graftedOn) {
           const wire = summary && summary.title
           if (typeof wire === 'string' && wire !== '' && !wire.includes('/')) {
@@ -4311,6 +4317,32 @@ window.__ModuleLoader__.load({
         const list = map[workspaceId]
         return Array.isArray(list) ? list : []
       }
+
+      React.useEffect(() => {
+        if (!groupScopeService || !Array.isArray(items) || !list?.byId) return
+        const scopes = {}
+        for (const workspace of items) {
+          const rows = (workspace.sessionIds || []).map(id => {
+            const summary = list.byId[id]
+            if (!summary) return null
+            return { id, title: rowTitleOf(id, summary, false), leaf: rowTitleOf(id, summary, false), allowGroups: summary.projectionValues?.[TITLE_SOURCE_KEY] === undefined || summary.projectionValues?.[TITLE_SOURCE_KEY] === 'user' }
+          }).filter(Boolean)
+          const tree = buildSessionTree(rows, sessionSlash, sessFolders, workspace.workspaceId)
+          const walk = node => {
+            for (const group of node.groups || []) {
+              const key = 'group:' + workspace.workspaceId + ':' + group.path
+              const manager = serviceBindings[key]
+              if (manager) scopes[manager] = {
+                workspaceId: workspace.workspaceId, incarnation: workspace.createdAt,
+                groupPath: group.path, sessionIds: collectSessionRows(group).map(row => row.id),
+              }
+              walk(group)
+            }
+          }
+          walk(tree)
+        }
+        groupScopeService.setSnapshot(scopes)
+      }, [items, list?.byId, sessionSlash, sessFolders, serviceBindings])
 
       const sessionsOf = (workspace) => {
         const rows = []
@@ -6045,7 +6077,7 @@ window.__ModuleLoader__.load({
             pulse: (statusPulse && !open) ? nodePulseOf(group) : null,
             count: countSessionTree(group),
             onToggle: () => { if (!searching) actions.setSessionGroupExpanded(key, !open) },
-            onContextMenu: (e) => openCtx('sgroup', { workspaceId, path: group.path, name: group.name, empty: countSessionTree(group) === 0 }, e),
+            onContextMenu: (e) => openCtx('sgroup', { workspaceId, path: group.path, name: group.name, sessionIds: collectSessionRows(group).map(row => row.id), empty: countSessionTree(group) === 0 }, e),
             dropInto: sgroupDropInto(workspaceId, group.path),
             dragEvents: sgroupDropEvents(workspaceId, group.path),
             custStyle: rowStyleOf('sgroup:' + workspaceId + '|' + group.path),
@@ -6598,6 +6630,7 @@ window.__ModuleLoader__.load({
           return sessionMenuEntriesFor(ctx.payload || {})
         }
         return [
+          { id: 'service-binding', label: t('service.choose') },
           { id: 'rename-sgroup', label: t('menu.renameSgroup'), icon: icon('IconEditOutline16', 16) },
           ...(ctx.payload && ctx.payload.empty ? [deleteSgroupEntry] : []),
           ...sgroupItems,
@@ -6652,6 +6685,10 @@ window.__ModuleLoader__.load({
         }
         else if (kind === 'folder' && id === 'rename-folder') setDialog({ kind: 'folder-rename', target: payload })
         else if (kind === 'folder' && id === 'delete-folder') setDialog({ kind: 'folder-delete', path: payload.path, scope: payload.scope, name: payload.name })
+        else if (kind === 'sgroup' && id === 'service-binding') {
+          const workspace = (items || []).find(w => w.workspaceId === payload.workspaceId)
+          if (workspace) setDialog({ kind: 'service-binding', workspace: { ...workspace, sessionIds: payload.sessionIds || [] }, bindingKey: 'group:' + payload.workspaceId + ':' + payload.path, groupPath: payload.path })
+        }
         else if (kind === 'sgroup' && id === 'delete-sgroup') setDialog({ kind: 'sgroup-delete', target: payload })
         else if (kind === 'workspace' && id === 'rename') setDialog({ kind: 'ws-rename', workspace: payload })
         else if (kind === 'workspace' && id === 'delete') setDialog({ kind: 'ws-delete', workspace: payload })
@@ -6727,7 +6764,7 @@ window.__ModuleLoader__.load({
       const dialogElement = (() => {
         if (dialog === null) return null
         if (dialog.kind === 'service-binding') return E(serviceFeature.Picker, {
-          store: bindingStore, MenuPicker, initialSessionId: dialog.initialSessionId, workspace: (items || []).find(w => w.workspaceId === dialog.workspace.workspaceId) || { workspaceId: dialog.workspace.workspaceId, sessionIds: [] },
+          store: bindingStore, MenuPicker, initialSessionId: dialog.initialSessionId, bindingKey: dialog.bindingKey, workspace: dialog.workspace,
           byId: list && list.byId, archived: archivedSet, titleOf: (id, summary) => rowTitleOf(id, summary, false), t, onClose: () => setDialog(null),
         })
         if (dialog.kind === 'batch-plan') return E(batchUI.BatchDialog, {
@@ -7169,6 +7206,7 @@ window.__ModuleLoader__.load({
     // persist key single-writer — dsh-client-store warns same-key instances
     // cross-pollinate one localStorage entry.
     let titleCacheRef = null
+    let groupScopeService = null
 
     const flowSource = (slots, hole) => ({
       getSnapshot: () => {
@@ -7210,6 +7248,21 @@ window.__ModuleLoader__.load({
         return rows.length === 1 && rows[0].id === id && rows[0].eligible
       })
       const restoration = recoveryFeature.createRestoration()
+
+      const groupScopeListeners = new Set()
+      let groupScopeSnapshot = { revision: 0, scopes: {} }
+      groupScopeService = {
+        getSnapshot: () => groupScopeSnapshot,
+        subscribe: listener => { groupScopeListeners.add(listener); return () => groupScopeListeners.delete(listener) },
+        setSnapshot: scopes => {
+          const next = JSON.stringify(scopes)
+          if (next === JSON.stringify(groupScopeSnapshot.scopes)) return
+          groupScopeSnapshot = { revision: groupScopeSnapshot.revision + 1, scopes }
+          for (const listener of groupScopeListeners) listener()
+        },
+        close: () => { groupScopeListeners.clear(); groupScopeSnapshot = { revision: 0, scopes: {} } },
+      }
+      if (typeof ctx.provide === 'function') ctx.effect(() => ctx.provide('betterWorkspaceGroupScope', groupScopeService), 'dsh-better-workspace: group scope')
 
       const slots = ctx.get('slots')
       if (slots === undefined || typeof slots.register !== 'function') {

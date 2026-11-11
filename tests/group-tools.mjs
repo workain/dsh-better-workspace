@@ -105,7 +105,13 @@ test('authoritative readback clears unknown fence and allows a deliberate recove
   })
   const first = await f.service.execute('move', move('unknown-recovered', ['s1', 's2', 's3']), f.exec())
   assert.deepEqual(first.report.map(row => row.outcome), ['success', 'unknown', 'not-attempted'])
+  // The next write itself performs recovery; no separate list call is needed.
+  const continued = await f.service.execute('move', move('continue-after-readback', ['s3']), f.exec())
+  assert.equal(continued.report[0].outcome, 'success')
+  // A title projection can lag provenance; exact title still reconciles on list.
+  f.rows.get('s2').sourceKind = 'provider'
   assert.equal((await f.service.execute('list', { workspaceId: 'A' }, f.exec())).uncertain, false)
+  f.rows.get('s2').sourceKind = 'user'
   const recovered = await f.service.execute('move', move('lift-after-readback', ['s2'], []), f.exec())
   assert.equal(recovered.report[0].outcome, 'success')
   assert.equal(f.rows.get('s2').title, 'Two')

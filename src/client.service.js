@@ -21,30 +21,31 @@ window.__ModuleLoader__.load({
         getSnapshot: () => state,
         subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn) },
         attach(next) { if (off) off(); form = next; off = next ? next.subscribe(publish) : null; publish() },
-        async save(workspaceId, sessionId, expectedRevision) {
+        async save(workspaceId, sessionId, expectedRevision, bindingKey = workspaceId) {
           if (!form || state.status !== 'ready' || !state.writable) throw new Error('settings-unavailable')
           if (sessionId && !await validate(workspaceId, sessionId)) throw new Error('session-unavailable')
           // Path operation + explicit namespace revision prevents one browser
           // overwriting another browser's binding using a stale map snapshot.
           const accepted = await form.mutate([{ op: sessionId ? 'set' : 'unset',
-            path: ['serviceSessions', workspaceId], ...(sessionId ? { value: sessionId } : {}) }], expectedRevision)
+            path: ['serviceSessions', bindingKey], ...(sessionId ? { value: sessionId } : {}) }], expectedRevision)
           if (!accepted) throw new Error('settings-refused')
         },
       }
     }
-    function Picker({ store, workspace, initialSessionId, byId, archived, titleOf, MenuPicker, t, onClose }) {
+    function Picker({ store, workspace, initialSessionId, bindingKey, byId, archived, titleOf, MenuPicker, t, onClose }) {
       const snapshot = React.useSyncExternalStore(store.subscribe, store.getSnapshot)
       const bindings = snapshot.value && snapshot.value.serviceSessions || {}
-      const [selected, setSelected] = React.useState(resolve(workspace, initialSessionId, byId, archived).id || bindings[workspace.workspaceId] || '')
+      const key = bindingKey || workspace.workspaceId
+      const [selected, setSelected] = React.useState(resolve(workspace, initialSessionId, byId, archived).id || bindings[key] || '')
       const [revision] = React.useState(snapshot.revision)
       const [busy, setBusy] = React.useState(false), [error, setError] = React.useState('')
       const candidates = (workspace.sessionIds || []).filter(id => resolve(workspace, id, byId, archived).id)
-      const current = resolve(workspace, bindings[workspace.workspaceId], byId, archived)
+      const current = resolve(workspace, bindings[key], byId, archived)
       const save = async () => {
         if (busy) return
         if (selected && !resolve(workspace, selected, byId, archived).id) { setError(t('service.missing')); return }
         setBusy(true); setError('')
-        try { await store.save(workspace.workspaceId, selected, revision); onClose() }
+        try { await store.save(workspace.workspaceId, selected, revision, key); onClose() }
         catch { setError(t('service.writeError')); setBusy(false) }
       }
       return E(ui.Modal, { open: true, title: t('service.choose'), closeLabel: t('close'), onClose: busy ? () => {} : onClose },

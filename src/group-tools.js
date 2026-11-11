@@ -40,8 +40,8 @@ export function createGroupingService(ctx) {
     if (!current) return false
     const confirmed = current.targets.every(target => {
       const row = rows.find(item => item.id === target.id)
-      return row && row.error === undefined && row.title === target.title && row.sourceKind === 'user'
-        && Number.isSafeInteger(row.eventSeq) && (target.beforeEventSeq === undefined || row.eventSeq > target.beforeEventSeq)
+      return row && row.error === undefined && row.title === target.title
+        && Number.isSafeInteger(row.eventSeq)
     })
     if (confirmed) { uncertain.delete(workspaceId); return true }
     return false
@@ -108,7 +108,7 @@ export function createGroupingService(ctx) {
       if (!previous.result) fail('operation-ended-before-plan')
       return structuredClone(previous.result)
     }
-    if (!args.dryRun && (busy.has(args.workspaceId) || uncertain.has(args.workspaceId))) fail('workspace-busy-or-uncertain')
+    if (!args.dryRun && busy.has(args.workspaceId)) fail('workspace-busy-or-uncertain')
     if (!args.dryRun) {
       if (completed.size >= 256 || ledgerBytes + MAX_OUTPUT > 16 * 1024 * 1024) fail('operation-ledger-full')
       // Reserve each result's full output allowance; never evict uncertain writes.
@@ -125,6 +125,11 @@ export function createGroupingService(ctx) {
       const result = safe({ workspaceId: args.workspaceId, dryRun: args.dryRun === true, report,
         warning: 'Renames are sequential, user-authored titles; may resume Agents, never send a prompt or unarchive. No atomic CAS/rollback. Never automatically repeat unknown writes. Empty browser-local declarations are unchanged.' })
       if (args.dryRun) return result
+      if (uncertain.has(args.workspaceId)) {
+        const recovery = await read(args.workspaceId, signal)
+        reconcile(args.workspaceId, recovery.rows)
+        if (uncertain.has(args.workspaceId)) fail('workspace-busy-or-uncertain')
+      }
       completed.get(key).result = result
       const expected = structuredClone(initial)
       for (const row of report) {
@@ -137,15 +142,29 @@ export function createGroupingService(ctx) {
         if (row.before === row.after && row.sourceKind === 'user') { row.outcome = 'unchanged'; continue }
         try {
           signal.throwIfAborted()
-          await ctx.sessionController.rename({ sessionId: row.id, title: row.after })
+          const accepted = await ctx.sessionController.rename({ sessionId: row.id, title: row.after })
+          const acceptedTitle = accepted && accepted.title
+          const acceptedSeq = accepted && accepted.seq
+          if (typeof acceptedTitle !== 'string' || !Number.isSafeInteger(acceptedSeq)) { row.outcome = 'unknown'; fence(args.workspaceId, row); break }
           row.outcome = 'success'
-          // Record the authoritative result; do not assume cache/response shape.
-          const after = await read(args.workspaceId, signal, [row.id])
-          const changed = after.rows[0]
-          if (!changed || changed.title !== row.after || changed.sourceKind !== 'user') { row.outcome = 'unknown'; fence(args.workspaceId, row); break }
-          const old = expected.rows.find(r => r.id === row.id)
-          Object.assign(old, changed)
-          if (!same(expected.workspace, after.workspace)) { row.outcome = 'stale-after-success'; break }
+          row.acceptedTitle = acceptedTitle
+          row.acceptedEventSeq = acceptedSeq
+          // The controller response is authoritative. The passive readback is
+          // still attempted for workspace/title observation, but a lagging
+          // projection must not turn an accepted normalized title into false
+          // unknown. A transport/rename exception above remains unknown.
+          try {
+            const after = await read(args.workspaceId, signal, [row.id])
+            const changed = after.rows[0]
+            if (changed && changed.title === acceptedTitle) {
+              const old = expected.rows.find(r => r.id === row.id)
+              Object.assign(old, changed)
+              if (!same(expected.workspace, after.workspace)) { row.outcome = 'stale-after-success'; break }
+            } else row.verification = 'pending-readback'
+          } catch (error) {
+            if (signal.aborted) throw error
+            row.verification = 'pending-readback'
+          }
         } catch {
           row.outcome = 'unknown'; fence(args.workspaceId, row); break
         }

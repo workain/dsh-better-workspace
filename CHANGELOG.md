@@ -3,6 +3,32 @@
 > 倒序排列,新版本条目在最上面。条目格式:`## vX.Y.Z — YYYY-MM-DD` + 类型(feat / fix / docs / chore)+ 要点 + 相关链接。
 > 纪律见 AGENTS.md「变更记录纪律」:发版前先更新本文件并随版本提交;事故复盘、复现与真机验证记录也记在这里。
 
+## v0.41.0-workain.11 — 2026-11-11 (candidate)
+
+- feat: the existing managing-session picker now also binds a recursive session group by exact `workspaceId + groupPath`; the Board integration receives the group's exact member IDs, including archived/age-hidden members, and refreshes the read-only scope when membership changes.
+- feat: the compatible Board session side panel can show local/Tracker tasks linked to every member of a group manager session without changing tasks, statuses, links, or persistence.
+- test: BWT 133/133 and Board 506 total, 505 pass, 0 fail, 1 inherited skip; Board build/check green. Board candidate is not installed.
+
+## v0.41.0-workain.10 — 2026-11-11 (candidate)
+
+- fix: use the native sessionController.rename accepted title/sequence as the authoritative write result; normalized or temporarily lagging passive projections no longer create false unknown outcomes, while actual rename/transport failures still fence the workspace.
+- test: full unit suite remains green with the existing partial/unknown and same-session recovery regressions.
+
+## v0.41.0-workain.9 — 2026-11-11 (candidate)
+
+- fix: a subsequent write now performs the fenced workspace's authoritative recovery read while holding the workspace lock, so the same tool session can continue after a confirmed unknown without requiring a separate list call or a new chat.
+- test: regression confirms a next batch succeeds through this in-operation readback and that unconfirmed unknown remains blocked.
+
+## v0.41.0-workain.8 — 2026-11-11 (candidate)
+
+- fix: reconciliation of an attempted unknown write accepts the exact authoritative title and valid event sequence even while the provenance projection is briefly stale; a confirmed batch can proceed without unsafe automatic retry.
+- test: regression simulates title-confirmed/provider-lagging readback, then performs one deliberate recovery move.
+
+## v0.41.0-workain.6 — 2026-11-11 (candidate)
+
+- fix: session rows now honor authoritative user title provenance directly during render, not only while updating the cache; an old provider display prefix cannot remain visible after a tool-driven root move.
+- test: full unit suite retains the title-cache regression and grouping recovery checks.
+
 ## v0.41.0-workain.5 — 2026-11-11 (candidate)
 
 - fix: user-authored root titles from native grouping no longer resurrect an old display-only group prefix from the browser title cache after refresh.
