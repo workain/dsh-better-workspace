@@ -27,8 +27,25 @@ function argsOf(args, operation) {
   return a
 }
 export function createGroupingService(ctx) {
-  const busy = new Set(), uncertain = new Set(), completed = new Map()
+  const busy = new Set(), uncertain = new Map(), completed = new Map()
   let disposed = false, ledgerBytes = 0
+  const fence = (workspaceId, row) => {
+    const current = uncertain.get(workspaceId)
+    const targets = current ? current.targets.slice() : []
+    if (row && !targets.some(item => item.id === row.id)) targets.push({ id: row.id, title: row.after, beforeEventSeq: row.expected?.eventSeq })
+    uncertain.set(workspaceId, { targets })
+  }
+  const reconcile = (workspaceId, rows) => {
+    const current = uncertain.get(workspaceId)
+    if (!current) return false
+    const confirmed = current.targets.every(target => {
+      const row = rows.find(item => item.id === target.id)
+      return row && row.error === undefined && row.title === target.title && row.sourceKind === 'user'
+        && Number.isSafeInteger(row.eventSeq) && (target.beforeEventSeq === undefined || row.eventSeq > target.beforeEventSeq)
+    })
+    if (confirmed) { uncertain.delete(workspaceId); return true }
+    return false
+  }
   const allowed = id => ctx.remoteAccess.allows({ kind: 'session', id })
   const workspace = wid => {
     if (disposed) fail('disposed')
@@ -77,7 +94,11 @@ export function createGroupingService(ctx) {
       if (items.length > MAX_MEMBERS) fail('workspace-list-over-limit')
       return safe({ workspaces: items.map(w => ({ workspaceId: w.id || w.workspaceId, title: w.title, incarnation: w.createdAt, sessionCount: w.sessionIds.length })), note: 'Select an exact workspaceId. Nonempty groups are title projections; empty browser-local declarations are not exposed.' })
     }
-    if (operation === 'list') { const value = await read(args.workspaceId, signal); return safe({ workspace: value.workspace, sessions: value.rows, groups: groupsOf(value.rows), uncertain: uncertain.has(args.workspaceId) }) }
+    if (operation === 'list') {
+      const value = await read(args.workspaceId, signal)
+      reconcile(args.workspaceId, value.rows)
+      return safe({ workspace: value.workspace, sessions: value.rows, groups: groupsOf(value.rows), uncertain: uncertain.has(args.workspaceId) })
+    }
     const key = owner + ':' + args.operationId
     const signature = JSON.stringify({ operation, ...args })
     if (!args.dryRun && completed.has(key)) {
@@ -121,12 +142,12 @@ export function createGroupingService(ctx) {
           // Record the authoritative result; do not assume cache/response shape.
           const after = await read(args.workspaceId, signal, [row.id])
           const changed = after.rows[0]
-          if (!changed || changed.title !== row.after || changed.sourceKind !== 'user') { row.outcome = 'unknown'; uncertain.add(args.workspaceId); break }
+          if (!changed || changed.title !== row.after || changed.sourceKind !== 'user') { row.outcome = 'unknown'; fence(args.workspaceId, row); break }
           const old = expected.rows.find(r => r.id === row.id)
           Object.assign(old, changed)
           if (!same(expected.workspace, after.workspace)) { row.outcome = 'stale-after-success'; break }
         } catch {
-          row.outcome = 'unknown'; uncertain.add(args.workspaceId); break
+          row.outcome = 'unknown'; fence(args.workspaceId, row); break
         }
       }
       return safe(structuredClone(result))

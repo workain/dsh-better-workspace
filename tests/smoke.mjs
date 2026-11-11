@@ -565,6 +565,9 @@ test('title cache: persisted key, batch learning, debounced save, bounded evicti
   api.rememberAllTitles(list4)
   assert.equal(api.titleCache.byId.g1.title, 'Other/renamed')
   assert.equal(api.titleCache.byId.g1.display, undefined, 'grouped rename clears the display')
+  api.titleCache.byId.g1 = { title: 'A/old', display: 'A/old', at: 1 }
+  api.rememberAllTitles({ byId: { g1: { title: 'fresh', projectionValues: { 'betterWorkspace/titleSource': 'user' } } } })
+  assert.equal(api.titleCache.byId.g1.display, undefined, 'user-authored root title never resurrects the old group display')
 })
 
 /**

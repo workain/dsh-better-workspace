@@ -3,6 +3,16 @@
 > 倒序排列,新版本条目在最上面。条目格式:`## vX.Y.Z — YYYY-MM-DD` + 类型(feat / fix / docs / chore)+ 要点 + 相关链接。
 > 纪律见 AGENTS.md「变更记录纪律」:发版前先更新本文件并随版本提交;事故复盘、复现与真机验证记录也记在这里。
 
+## v0.41.0-workain.5 — 2026-11-11 (candidate)
+
+- fix: user-authored root titles from native grouping no longer resurrect an old display-only group prefix from the browser title cache after refresh.
+- test: regression covers provider-grouped display followed by authoritative user root title.
+
+## v0.41.0-workain.4 — 2026-11-11 (candidate)
+
+- fix: an explicit workspace_session_groups readback now reconciles an unknown rename only when the expected user title/source and newer authoritative event sequence are observed; confirmed unknown-after-apply writes no longer permanently fence deliberate recovery to the root.
+- test: regression covers unknown transport after apply, readback confirmation and one explicit recovery move; an unconfirmed unknown remains fenced.
+
 ## v0.41.0-workain.3 — 2026-11-10 (candidate)
 
 - feat: four owner-trusted agent tools discover workspaces, read complete session groups, move explicit sessions and rename/move exact nested groups in the explicitly selected workspace without a mandatory confirmation dialog.

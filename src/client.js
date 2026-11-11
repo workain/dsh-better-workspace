@@ -1275,8 +1275,14 @@ window.__ModuleLoader__.load({
         if (typeof title !== 'string' || title === '') continue
         const prev = byId[id]
         if (prev && prev.title === title) continue
+        const source = summary && summary.projectionValues && typeof summary.projectionValues === 'object'
+          ? summary.projectionValues['betterWorkspace/titleSource'] : undefined
         const base = prev ? (prev.display || prev.title) : undefined
-        const grafted = graftTitleDisplay(base, title)
+        // A user-authored title is authoritative: native grouping tools and the
+        // menu rename both deliberately remove the old display-only prefix.
+        // Provider titles may still graft a remembered group while the cold
+        // projection catches up, but a user rename must never resurrect it.
+        const grafted = source === 'user' ? undefined : graftTitleDisplay(base, title)
         const entry = { title: title, at: now }
         if (grafted !== undefined) entry.display = grafted
         byId[id] = entry

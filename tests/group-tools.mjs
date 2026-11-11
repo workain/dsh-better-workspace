@@ -94,6 +94,23 @@ test('partial unknown stops subsequent writes, replay returns report and workspa
   await assert.rejects(f.service.execute('move', move('new'), f.exec()), /workspace-busy-or-uncertain/)
   assert.equal(f.calls.length, 2)
 })
+test('authoritative readback clears unknown fence and allows a deliberate recovery move', async () => {
+  const f = fixture(); let failOnce = true
+  f.setRename(id => {
+    if (id === 's2' && failOnce) {
+      failOnce = false
+      Object.assign(f.rows.get(id), { title: 'target/Two', sourceKind: 'user', eventSeq: 2 })
+      throw Error('transport-after-apply')
+    }
+  })
+  const first = await f.service.execute('move', move('unknown-recovered', ['s1', 's2', 's3']), f.exec())
+  assert.deepEqual(first.report.map(row => row.outcome), ['success', 'unknown', 'not-attempted'])
+  assert.equal((await f.service.execute('list', { workspaceId: 'A' }, f.exec())).uncertain, false)
+  const recovered = await f.service.execute('move', move('lift-after-readback', ['s2'], []), f.exec())
+  assert.equal(recovered.report[0].outcome, 'success')
+  assert.equal(f.rows.get('s2').title, 'Two')
+})
+
 test('membership incarnation and external title changes stop before a stale target is overwritten', async () => {
   const f = fixture(); f.setRename(id => { if (id === 's1') f.rows.get('s2').title = 'edited elsewhere' })
   const r = await f.service.execute('move', move('stale', ['s1', 's2']), f.exec())
