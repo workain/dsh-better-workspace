@@ -1,0 +1,44 @@
+# Доска workspace и контекст сессий
+
+## Согласованный пользовательский результат
+
+- Для каждого DSH workspace хранится явная доска по умолчанию.
+- Источник доски — существующий DSH Board; доска может быть локальной или построенной адаптером Yandex Tracker.
+- В доске для workspace по умолчанию включён фильтр «есть связанная сессия». Связь считается только по действующей явной связи task↔session, причём session должна входить в актуальное членство выбранного workspace. Совпадение строки/ключа/заголовка не считается связью.
+- В карточке и деталке task read-only отображаются цели и полный последний todo-снимок всех связанных доступных сессий. Каждый блок помечается сессией; цели не интерпретируются как todo/шаги.
+- Наличие связи и доступность содержимого/перехода — разные признаки. Для фильтра сохраняется действующая семантика DSH Board: явная связь и актуальное членство в workspace. Архивность сама по себе не означает отсутствия связи; недоступное чтение показывается отдельно, без подмены кэшем. Вышедшие из workspace сессии не учитываются.
+- Никаких автоматических write в Tracker, DSH goals/todo, сессии, статусы или расписания. Состояние Tracker не меняется состоянием сессии.
+
+## Фактическая диагностика rc.1
+
+DSH Board имеет в локальной модели `workspace.defaultBoardId`, привязанные `boardIds` и чистую функцию `setDefaultBoard`. Это не доступная HTTP-операция: `service.mjs:64–75` её не принимает, а `snapshot()` в строках 44–62 не возвращает default-поле. Упоминание default в `deletionIdentity()` относится к guard удаления, а не к DTO выбора доски. Поэтому нужны проверяемая операция настройки, DTO и клиентский выбор; наличие функции в core не означает готового API.
+
+Фильтр linked-session уже реализован: client проверяет `snapshot.links` и актуальные `workspace.sessionIds`; это можно переиспользовать без новой классификации задач. Tracker boards уже выбираются отдельно на workspace и проходят собственную проверку доступа; «доска по умолчанию» должна быть единым локальным указателем на выбранный источник, а не копией/перезаписью Tracker статусов.
+
+Для целей и todo действующий `ctx.sessionQuery.observeSession(sessionId,{projectionMode:'all'})` возвращает immutable read lease с `ProjectionSnapshot`. В snapshot values действующий rc.1 контракт содержит `todos` (последний полный `todo/write`, либо null) и goal projection; `goals/get` — direct remote только для exact live agent и не подходит как массовый passive read. Реализация должна использовать passive observation/projection read, не `using`, не Agent activation и не prompt.
+
+## Подтверждённый выбор
+
+Владелец выбрал одну общую default-доску на workspace: reference `{provider:'local'|'tracker', boardId}`. Выбранные Tracker boards остаются отдельным набором доступа; default не выдаёт дополнительных прав. Действия настройки — явные с контролем revision; нельзя обещать per-workspace CAS до проверки выбранного хранилища. Текущие board/task/status данные не менять.
+
+Проекции rc.1: `values.todos` — TodoItem[] или null; `values.goal` — GoalProjection или null, где цель находится в `.goal`, а roundsStarted/createdAt/updatedAt принадлежат обёртке. Lease освобождать в finally, ограничить параллелизм и объём; ошибку одной сессии не превращать в «целей нет». `goals/get` требует live agent и не используется.
+
+Предпочтительная реализация — расширить существующий DSH Board, не копировать его UI в MIT-форк Better Workspace. У board нет опубликованной лицензии на такой перенос. Узкий board-owned клиентский контракт позволит дереву открыть доску workspace с linked-фильтром, не перехватывая DOM и не меняя клик управляющей сессии. Действующий release/plugins/board остаётся read-only. Найден workain/dsh-board: критические модули исходного commit `4b06de2` побайтово совпали с установленным пакетом. Создана одна отдельная ветка доски `task/guard-377-workspace-board-context`; исходный checkout не менялся. Better Workspace получает только узкую optional-интеграцию в существующей ветке/PR.
+
+## Ограничения и приёмка
+
+Текущая установленная GUI остаётся без изменения до отдельного разрешения на новую версию. Реальные задачи/сессии не мутировать; fixture должна доказать local+Tracker-shaped board, hidden/archived membership, linked filter, multiple sessions aggregation, missing projection and stale read. Карточка и drawer проверяются DOM/keyboard/refresh; визуальный pixel review отдельно.
+
+После подтверждения одной default-доски реализация началась в существующей feature-ветке дерева и отдельной feature-ветке исходного DSH Board. Tracker issue GUARD-377 описывает этот scope; статусы не менялись. Прежний отказ штатного комментария `approval_denied` не обходился через другой API.
+
+## Кандидат интеграции дерева
+
+Кандидат Better Workspace `0.41.0-workain.2` добавляет два отдельных пункта меню workspace: открытие его доски и настройка default-доски. Узкий optional-контракт DSH Board: `workspaceBoard.open(workspaceId)` / `configure(workspaceId)`, синхронный boolean означает только принятие намерения, не успешную загрузку доски. Метод получает ID конкретного пункта меню, без обращения к общему default/current workspace. При отсутствии provider действия скрыты; при его исчезновении/отказе показывается ошибка, без подмены другим интерфейсом.
+
+Parent независимо повторил 118 тестов: pass118, fail0, skipped0. Новые 8 проверок исполняют production helper и реальные shared/local menu resolvers: отсутствующий/поздний/сменившийся provider, удаление между открытием и кликом, отказ, исключение и независимые A/B targets. Двойной клик/имя управляющей сессии, стрелка и hero-пикер не менялись. Упаковка включает новый chunk, не включает тесты/Task-документы. Candidate SHA-256 `95bfc32d309a4c6affdb35df2052f7a7cd28285d1a20256f7068649bcc84b1a2`.
+
+Совместная нативная приёмка завершена: точные Board `0.1.1-workain.1` и BWT `.2` tarballs проверены в новом HOME. Настоящее меню BWT открывает отдельные доски Alpha/Beta с linked filter; настройка Alpha не становится общей для Harness; стрелка раскрывает дерево независимо. Pageerror 0, сервер завершён. Повторены native карточка/деталка/цели/todo/архивный участник, late A → manual B и недоступный default. Header/event SHA-256 не изменились, пять source-сессий остались cold, все Agent/member/archive поля сохранились. Tracker-shaped UI carrier не заменяет проверку реального Tracker account.
+
+Board прошёл независимое delta review PASS и parent `506 total, 505 pass, 0 fail, 1 прежний optional skip`, build PASS. Его точный tarball SHA-256 `a15efe7ba245fab152f42ffadba9b8225cba6bfa3ec10a37aa1137c81eabb438`. Исправлены подтверждённые ранним ревью ошибки blockedReason, receiver binding, stale intent и недоступного default без ослабления требований. Старые optional Board harness несовместимы с приватными rc.1 деталями; их не объявляли зелёными. Визуальная приёмка владельцем и реальная ограниченная transport-role отдельно не выполнены.
+
+Новые версии ещё не устанавливались: рабочая GUI остаётся на ранее принятом `0.41.0-workain.1`. Цели/todo в ней пока отсутствуют. Старые данные, board links и статусы не менялись. Для подключения обеих новых версий нужно отдельное разрешение.

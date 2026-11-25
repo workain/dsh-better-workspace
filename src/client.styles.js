@@ -13,6 +13,9 @@ window.__ModuleLoader__.load({
   chunk: 'client.styles.js',
   factory: () => {
     const CSS_TEXT = [
+      '.bw-service-label,.bw-tree-toggle{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;text-align:left;padding:0}',
+      '.bw-service-label:focus-visible,.bw-tree-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5b8def);outline-offset:2px}',
+      '.bw-recovery{padding:12px;color:var(--dsw-alias-label-primary)}',
       '.bw-root{height:100%;display:flex;flex-direction:column;min-height:0;position:relative;color:var(--dsw-alias-label-primary,#e6e6e6)}',
       '.bw-header{display:flex;align-items:center;gap:2px;padding:10px 10px 4px;flex:none}',
       '.bw-header-title{flex:1;font-size:14px;font-weight:400;line-height:20px;color:var(--dsw-alias-label-tertiary,#9a9a9a);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
@@ -114,6 +117,7 @@ window.__ModuleLoader__.load({
       '.bw-chevron{flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-caption,#adb2b8)}',
       '.bw-chevron-open .bw-arrow{transform:rotate(90deg)}',
       '.bw-container-row .bw-chevron{display:none}',
+      '.bw-container-row .bw-tree-toggle{display:inline-flex}',
       '.bw-container-row:hover .bw-chevron,.bw-container-row.menu-open .bw-chevron{display:inline-flex}',
       '.bw-container-row:hover .bw-folder-cell,.bw-container-row.menu-open .bw-folder-cell{display:none}',
       '.bw-arrow{flex:none;display:inline-flex;transition:transform 150ms var(--ds-ease-in-out,ease-in-out)}',

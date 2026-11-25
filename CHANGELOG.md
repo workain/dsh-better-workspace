@@ -3,6 +3,70 @@
 > 倒序排列,新版本条目在最上面。条目格式:`## vX.Y.Z — YYYY-MM-DD` + 类型(feat / fix / docs / chore)+ 要点 + 相关链接。
 > 纪律见 AGENTS.md「变更记录纪律」:发版前先更新本文件并随版本提交;事故复盘、复现与真机验证记录也记在这里。
 
+## v0.41.0-workain.13-guard507.1 — 2026-11-25
+
+- fix: restore session-group context menus on DSH rc.5 using the supported `anchorPoint` / `anchorRef` Menu API, with keyboard focus restoration and a discoverable group ⋯ button.
+- fix: group managing-session assignment no longer falls through the single-session branch; opening and saving validate the exact recursive group, current membership, explicit binding and availability.
+- feat: create a fresh session directly inside a group, create a subgroup, and select nested/empty groups or no group in the New Session hero of the selected workspace.
+- note: group choice is an explicit user-title edit; automatic naming is disabled. Existing sessions and group settings are not migrated during installation.
+- test: executable menu/DOM and session-lifecycle regressions added. Visual verification requires the owner's browser; no browser-control tool is available in this session.
+- task: https://tracker.yandex.ru/GUARD-507
+
+## v0.41.0-workain.11 — 2026-11-11 (candidate)
+
+- feat: the existing managing-session picker now also binds a recursive session group by exact `workspaceId + groupPath`; the Board integration receives the group's exact member IDs, including archived/age-hidden members, and refreshes the read-only scope when membership changes.
+- feat: the compatible Board session side panel can show local/Tracker tasks linked to every member of a group manager session without changing tasks, statuses, links, or persistence.
+- test: BWT 133/133 and Board 506 total, 505 pass, 0 fail, 1 inherited skip; Board build/check green. Board candidate is not installed.
+
+## v0.41.0-workain.10 — 2026-11-11 (candidate)
+
+- fix: use the native sessionController.rename accepted title/sequence as the authoritative write result; normalized or temporarily lagging passive projections no longer create false unknown outcomes, while actual rename/transport failures still fence the workspace.
+- test: full unit suite remains green with the existing partial/unknown and same-session recovery regressions.
+
+## v0.41.0-workain.9 — 2026-11-11 (candidate)
+
+- fix: a subsequent write now performs the fenced workspace's authoritative recovery read while holding the workspace lock, so the same tool session can continue after a confirmed unknown without requiring a separate list call or a new chat.
+- test: regression confirms a next batch succeeds through this in-operation readback and that unconfirmed unknown remains blocked.
+
+## v0.41.0-workain.8 — 2026-11-11 (candidate)
+
+- fix: reconciliation of an attempted unknown write accepts the exact authoritative title and valid event sequence even while the provenance projection is briefly stale; a confirmed batch can proceed without unsafe automatic retry.
+- test: regression simulates title-confirmed/provider-lagging readback, then performs one deliberate recovery move.
+
+## v0.41.0-workain.6 — 2026-11-11 (candidate)
+
+- fix: session rows now honor authoritative user title provenance directly during render, not only while updating the cache; an old provider display prefix cannot remain visible after a tool-driven root move.
+- test: full unit suite retains the title-cache regression and grouping recovery checks.
+
+## v0.41.0-workain.5 — 2026-11-11 (candidate)
+
+- fix: user-authored root titles from native grouping no longer resurrect an old display-only group prefix from the browser title cache after refresh.
+- test: regression covers provider-grouped display followed by authoritative user root title.
+
+## v0.41.0-workain.4 — 2026-11-11 (candidate)
+
+- fix: an explicit workspace_session_groups readback now reconciles an unknown rename only when the expected user title/source and newer authoritative event sequence are observed; confirmed unknown-after-apply writes no longer permanently fence deliberate recovery to the root.
+- test: regression covers unknown transport after apply, readback confirmation and one explicit recovery move; an unconfirmed unknown remains fenced.
+
+## v0.41.0-workain.3 — 2026-11-10 (candidate)
+
+- feat: four owner-trusted agent tools discover workspaces, read complete session groups, move explicit sessions and rename/move exact nested groups in the explicitly selected workspace without a mandatory confirmation dialog.
+- safety: authoritative passive reads, provenance/quote/path roundtrip validation, blank/subagent exclusions, full archived membership, per-workspace serialization and bounded operation replay ledger. Unknown writes stop and fence this workspace for the host lifetime; no automatic retry or rollback.
+- test: native registered Tools executor plus Chromium proves passive reads do not activate Agents, public rename sends no prompt/unarchive, own/other-workspace selection is explicit and a resulting group is visible. Host grammar is a parity-enforced extraction of the canonical checked-in client parser, not a separate naive slash parser.
+
+## v0.41.0-workain.2 — 2026-11-09 (candidate, not installed)
+
+- feat: optional board-owned workspace menu actions for opening/configuring that workspace's default board; managing-session clicks and expansion remain unchanged. No Harness-wide default board.
+- test: optional provider absence/disposal/replacement, rejected intents and separate A/B workspace targets are covered by executable menu tests.
+
+## v0.41.0-workain.1 — 2026-11-09 (reviewed, installed after owner approval)
+
+- feat: explicit managing-session assignment in native profile settings; separate workspace label navigation and expansion control.
+- fix: scope group mutations by exact tree identity and complete underlying membership; preview sequential writes and report partial/unknown outcomes without automatic retries.
+- fix: preserve quoted group segments, nested name-only parent keys and immediate physical ownership during moves; keep the hero picker functional across all view modes.
+- fix: use public rc.1 session rename lifetime and indexed subagent aggregation; provide recovery to the original stock slot owner.
+- chore: retain upstream MIT attribution, package/storage identity and rc.1-only baseline; add package-local chunks and synthetic behavior/integration fixtures. No upstream release or production installation.
+
 ## v0.41.0 — 2026-11-07
 
 **类型**:feat(新增「隐藏较早会话」纯视图过滤,整理自 PR #21)
