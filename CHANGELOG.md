@@ -3,6 +3,18 @@
 > 倒序排列,新版本条目在最上面。条目格式:`## vX.Y.Z — YYYY-MM-DD` + 类型(feat / fix / docs / chore)+ 要点 + 相关链接。
 > 纪律见 AGENTS.md「变更记录纪律」:发版前先更新本文件并随版本提交;事故复盘、复现与真机验证记录也记在这里。
 
+## v0.41.0-workain.15-guard512.2 — 2026-11-25
+
+- fix: preserve the concurrently installed GUARD-510 sidebar badge changes: indicators remain beside session titles during hover/menu actions and observe lazy slot registration. Combined with the new-group UI below; no Telegram settings or links change.
+- task: https://tracker.yandex.ru/GUARD-512 and https://tracker.yandex.ru/GUARD-510
+
+## v0.41.0-workain.15-guard512.1 — 2026-11-25
+
+- feat: create and select a session group directly from the New Session group menu; a matching workspace-menu action supports the first group without adding a permanent button or empty dropdown.
+- feat: native compact modal with nested-path input, cancel/busy/error feedback, and captured session/title identity. Successful assignment precedes declaration and ancestor expansion; cancelled or refused changes leave no phantom group.
+- test: creation/cancel/validation/error/race cases and first-group discoverability are covered by executable DOM and production-handler regressions.
+- task: https://tracker.yandex.ru/GUARD-512
+
 ## v0.41.0-workain.14-guard508.1 — 2026-11-25
 
 - fix: match the New Session group dropdown to the native workspace chip: transparent compact trigger, same spacing/type/icons and hover state, no field-name prefix or caption below.

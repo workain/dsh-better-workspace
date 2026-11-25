@@ -2334,8 +2334,8 @@ window.__ModuleLoader__.load({
         }))
         : null
       // Official alpha.2 row-trailing strip: a list seat nested INSIDE the
-      // row, between the time cell and the pin marker, hidden while the hover
-      // actions show. Officially populated by the experimental worktree/PR
+      // row, immediately after the title, including while hover actions show.
+      // Populated by Telegram and the experimental worktree/PR
       // icon; rendering it here keeps that surface visible in our sidebar.
       const trailingSeats = sessionActions && Array.isArray(sessionActions.trailingSeat)
         ? sessionActions.trailingSeat
@@ -2448,10 +2448,11 @@ window.__ModuleLoader__.load({
             : (markNode || E('span', { className: 'bw-dot' })),
         ),
         E('span', { className: 'bw-row-label', ref: marquee.titleRef }, title),
+        // Indicators belong beside the title and remain when hover actions replace time.
+        trailingNode,
         // Official blank rows carry no time, no pin, no actions (a standing
         // "new session" placeholder, not a session).
         !node.blank ? E('span', { className: 'bw-row-time' }, timeLabel(node.updatedAt, now, t)) : null,
-        trailingNode,
         !node.blank && node.pinned ? E('span', { className: 'bw-pin-indicator', role: 'img', 'aria-label': pinnedTitle || undefined, title: pinnedTitle || undefined }, icon('IconPinFillRegular', 13)) : null,
         strip,
       )
@@ -3356,6 +3357,16 @@ window.__ModuleLoader__.load({
     const HERO_FLOW_HOLE = 'conversation.hero.workspace.directoryFlow'
     /** Menu id of the picker's pinned add action — namespaced so it can never collide with a workspace id. */
     const HERO_ADD_ID = '::bw-hero-add'
+    const HERO_CREATE_GROUP_ID = '::bw-hero-create-group'
+    const normalizeHeroGroupPath = raw => {
+      const input = String(raw || '').trim()
+      if (!input || input.length > 1024 || /[\u0000-\u001f\u007f]/.test(input)) throw Error('group-name-invalid')
+      const parts = splitTitleSegs(input)
+      const path = parts.join('/')
+      const roundtrip = splitTitleSegs(path + '/__bw_new_session__').slice(0, -1)
+      if (!path || parts.length !== roundtrip.length || parts.some((part, i) => part !== roundtrip[i])) throw Error('group-name-invalid')
+      return path
+    }
     /** Stable empty array for memo dependencies. */
     const EMPTY_LIST = []
 
@@ -3420,6 +3431,16 @@ window.__ModuleLoader__.load({
       const createWorkspace = props.createWorkspace
 
       const snapshot = typeof useWorkspaces === 'function' ? useWorkspaces(state => state) : null
+      const heroSessions = typeof props.useSessions === 'function' ? props.useSessions(state => state) : null
+      const groupingEnabled = typeof useStore !== 'function' || useStore(state => !state || state.sessionTitleSlash !== false)
+      const heroCurrentId = mainSessionIdOf(heroSessions)
+      const heroCurrent = heroSessions && heroSessions.byId && heroSessions.byId[heroCurrentId]
+      const selectedWorkspace = snapshot && snapshot.items && snapshot.items.find(w => w.workspaceId === selectedId)
+      const canCreateGroup = groupingEnabled && heroCurrent && heroCurrent.blank === true && heroCurrent.origin !== 'subagent'
+        && selectedWorkspace && selectedWorkspace.sessionIds.includes(heroCurrentId)
+        && !(snapshot.archivedSessionIds || []).includes(heroCurrentId) && typeof props.createSessionGroup === 'function'
+      const [newGroupWorkspace, setNewGroupWorkspace] = React.useState(null)
+      React.useEffect(() => { setNewGroupWorkspace(null) }, [selectedId, heroCurrentId])
       const groupBy = typeof useStore === 'function'
         ? useStore(state => (state && state.groupBy) || 'workspace-tree')
         : 'workspace-tree'
@@ -3574,7 +3595,9 @@ window.__ModuleLoader__.load({
           .then(() => { setPicking(false) })
       }
       const menuReady = typeof ui.Menu === 'function'
-      const menuOpen = props.open === true && (rows.length > 0 || addEntry !== null)
+      const createGroupEntry = canCreateGroup ? { id: HERO_CREATE_GROUP_ID, label: t('heroGroup.create'), icon: icon('IconPlusOutlineRegular', 16) } : null
+      const footerEntries = [createGroupEntry, addEntry].filter(Boolean)
+      const menuOpen = props.open === true && (rows.length > 0 || footerEntries.length > 0)
       const flowNode = flowComponent && flowOpen
         ? E(flowComponent, {
           key: 'bw-hero-flow',
@@ -3603,7 +3626,10 @@ window.__ModuleLoader__.load({
           Menu: ui.Menu, folderIcon: icon('IconFolderOpenRegular', 16), chevronIcon: icon('IconChevronDownOutlineRegular', 12),
           workspaceId: selectedId, useSessions: props.useSessions, useWorkspaces,
           useStore, groupOptions: props.groupOptions, currentSessionId: mainSessionIdOf,
-          groupPath: props.groupPath, assignSessionGroup: props.assignSessionGroup, t,
+          groupPath: props.groupPath, assignSessionGroup: props.assignSessionGroup,
+          Modal: ui.Modal, Button: BTN, createOpen: newGroupWorkspace !== null && newGroupWorkspace === selectedId && !!canCreateGroup,
+          onCreateClose: () => setNewGroupWorkspace(null), createSessionGroup: props.createSessionGroup,
+          normalizeGroupPath: normalizeHeroGroupPath, t,
         }) : null,
         menuReady ? E(ui.Menu, {
           open: menuOpen,
@@ -3611,13 +3637,19 @@ window.__ModuleLoader__.load({
           // never the trigger (ui-conversation renders the chip itself).
           anchor: null,
           items: EMPTY_LIST,
-          ...(addEntry ? { footer: [addEntry] } : {}),
+          ...(footerEntries.length > 0 ? { footer: footerEntries } : {}),
           portal: true,
           dense: true,
           side: 'bottom',
           anchorRef,
           onClose: () => { if (typeof onClose === 'function') onClose() },
-          onSelect: (id) => { if (id === HERO_ADD_ID) openFlow() },
+          onSelect: (id) => {
+            if (id === HERO_ADD_ID) openFlow()
+            else if (id === HERO_CREATE_GROUP_ID && canCreateGroup) {
+              setNewGroupWorkspace(selectedId)
+              if (typeof onClose === 'function') onClose()
+            }
+          },
         }, rows) : null,
         flowNode,
         errorNode,
@@ -3639,7 +3671,7 @@ window.__ModuleLoader__.load({
         useDirectoryFlow,
         pickDirectory, listDirectory, createDirectory,
         sidebarFlowEntry,
-        shippedBrowserFace, scheduleSeatReader, seatEntriesReader,
+        shippedBrowserFace, scheduleSeatReader, seatEntriesReader, trailingSeatSource,
         officialT,
         presetFaceOf,
         contextMenuFaceOf, setMenuBridge, bindingStore, refreshCatalog, readTitles, workspaceBoardActions, startSessionInGroup,
@@ -3665,6 +3697,9 @@ window.__ModuleLoader__.load({
       // workspace row's open state, while the bridge carries the live bw
       // extras into the apply-level contribution.
       const activeContextMenu = useActiveContextMenu(contextMenuFaceOf)
+      // Lazy plugins can register indicators after this browser first mounts.
+      // A ledger revision, not unrelated session activity, drives re-reading them.
+      useObservableSnapshot(trailingSeatSource)
 
       if (typeof useWorkspaces !== 'function' || typeof useSessions !== 'function') {
         throw new Error('required standard snapshot hooks missing')
@@ -7357,6 +7392,7 @@ window.__ModuleLoader__.load({
         console.error('[dsh-better-workspace] slots service unavailable; plugin idle')
         return
       }
+      const trailingSeatSource = operations.slotRevisionSource(slots, 'sidebar.session.row.trailing')
       const sessions = ctx.get('sessions')
       const workspaces = ctx.get('workspaces')
       const uiWorkspace = ctx.get('uiWorkspace')
@@ -7665,6 +7701,7 @@ window.__ModuleLoader__.load({
       }
 
       const browserInjected = () => ({
+        trailingSeatSource,
         // Official 'workspace' dictionary translate (menu copy follows upstream);
         // null when the bind failed — the menu then uses the aligned bw copy.
         officialT,
@@ -7920,6 +7957,15 @@ window.__ModuleLoader__.load({
           groupPickerComponent: groupPickerFeature.GroupPicker,
           groupOptions: heroGroupOptions,
           assignSessionGroup: groupCreation.assign,
+          createSessionGroup: async (id, workspaceId, rawPath, expectedTitle) => {
+            const path = normalizeHeroGroupPath(rawPath)
+            // Assign first: a refused/stale title must not leave a phantom group.
+            await groupCreation.assign(id, workspaceId, path, expectedTitle)
+            viewInstance.actions.addFolder('session', workspaceId, path)
+            viewInstance.actions.setSessionsExpanded(workspaceId, true)
+            const parts = splitTitleSegs(path)
+            for (let i = 1; i <= parts.length; i++) viewInstance.actions.setSessionGroupExpanded(workspaceId + '|' + parts.slice(0, i).join('/'), true)
+          },
           groupPath: row => groupCreation.pathOf(row.id, row.title || '') ?? (groupsAllowedFor(row) ? splitTitleSegs(row.title || '').slice(0, -1).join('/') : ''),
           createWorkspace: (input) => workspaces.create(input),
           /**

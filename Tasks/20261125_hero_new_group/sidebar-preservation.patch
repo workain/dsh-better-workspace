@@ -1,0 +1,153 @@
+--- a/src/client.js
++++ b/src/client.js
+@@ -2334,8 +2334,8 @@
+         }))
+         : null
+       // Official alpha.2 row-trailing strip: a list seat nested INSIDE the
+-      // row, between the time cell and the pin marker, hidden while the hover
+-      // actions show. Officially populated by the experimental worktree/PR
++      // row, immediately after the title, including while hover actions show.
++      // Populated by Telegram and the experimental worktree/PR
+       // icon; rendering it here keeps that surface visible in our sidebar.
+       const trailingSeats = sessionActions && Array.isArray(sessionActions.trailingSeat)
+         ? sessionActions.trailingSeat
+@@ -2448,10 +2448,11 @@
+             : (markNode || E('span', { className: 'bw-dot' })),
+         ),
+         E('span', { className: 'bw-row-label', ref: marquee.titleRef }, title),
++        // Indicators belong beside the title and remain when hover actions replace time.
++        trailingNode,
+         // Official blank rows carry no time, no pin, no actions (a standing
+         // "new session" placeholder, not a session).
+         !node.blank ? E('span', { className: 'bw-row-time' }, timeLabel(node.updatedAt, now, t)) : null,
+-        trailingNode,
+         !node.blank && node.pinned ? E('span', { className: 'bw-pin-indicator', role: 'img', 'aria-label': pinnedTitle || undefined, title: pinnedTitle || undefined }, icon('IconPinFillRegular', 13)) : null,
+         strip,
+       )
+@@ -3639,7 +3640,7 @@
+         useDirectoryFlow,
+         pickDirectory, listDirectory, createDirectory,
+         sidebarFlowEntry,
+-        shippedBrowserFace, scheduleSeatReader, seatEntriesReader,
++        shippedBrowserFace, scheduleSeatReader, seatEntriesReader, trailingSeatSource,
+         officialT,
+         presetFaceOf,
+         contextMenuFaceOf, setMenuBridge, bindingStore, refreshCatalog, readTitles, workspaceBoardActions, startSessionInGroup,
+@@ -3665,6 +3666,9 @@
+       // workspace row's open state, while the bridge carries the live bw
+       // extras into the apply-level contribution.
+       const activeContextMenu = useActiveContextMenu(contextMenuFaceOf)
++      // Lazy plugins can register indicators after this browser first mounts.
++      // A ledger revision, not unrelated session activity, drives re-reading them.
++      useObservableSnapshot(trailingSeatSource)
+ 
+       if (typeof useWorkspaces !== 'function' || typeof useSessions !== 'function') {
+         throw new Error('required standard snapshot hooks missing')
+@@ -7357,6 +7361,7 @@
+         console.error('[dsh-better-workspace] slots service unavailable; plugin idle')
+         return
+       }
++      const trailingSeatSource = operations.slotRevisionSource(slots, 'sidebar.session.row.trailing')
+       const sessions = ctx.get('sessions')
+       const workspaces = ctx.get('workspaces')
+       const uiWorkspace = ctx.get('uiWorkspace')
+@@ -7665,6 +7670,7 @@
+       }
+ 
+       const browserInjected = () => ({
++        trailingSeatSource,
+         // Official 'workspace' dictionary translate (menu copy follows upstream);
+         // null when the bind failed — the menu then uses the aligned bw copy.
+         officialT,
+--- a/src/client.operations.js
++++ b/src/client.operations.js
+@@ -3,6 +3,12 @@
+   id: 'dsh-better-workspace', chunk: 'client.operations.js',
+   factory: () => {
+     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
++    // The documented slot revision is stable until an occupant is added/removed.
++    // Reading the ledger only on unrelated session renders misses lazy plugins.
++    const slotRevisionSource = (slots, name) => ({
++      getSnapshot: () => slots.getVersion(name),
++      subscribe: listener => slots.subscribe(name, listener),
++    })
+     // Never walk disk subtrees when changing a NAME group: those workspaces
+     // belong to another physical container even when their labels match.
+     const folderMembers = (node) => {
+@@ -172,6 +178,6 @@
+       }
+       return done
+     }
+-    return { folderMembers, findFolder, folderIdentities, retitle, createRunner, orderPlan, renameSession, subagentCounts }
++    return { slotRevisionSource, folderMembers, findFolder, folderIdentities, retitle, createRunner, orderPlan, renameSession, subagentCounts }
+   },
+ })
+--- a/src/client.styles.js
++++ b/src/client.styles.js
+@@ -159,7 +159,7 @@
+       '.bw-row-trailing{flex:none;display:inline-flex;align-items:center;gap:6px;color:var(--dsw-alias-label-tertiary,#9a9a9a)}',
+       '.bw-row-actions{flex:none;display:none;align-items:center;gap:15px}',
+       '.bw-row:hover .bw-row-actions,.bw-row.menu-open .bw-row-actions{display:flex}',
+-      '.bw-row:hover .bw-row-time,.bw-row:hover .bw-row-count,.bw-row:hover .bw-row-trailing,.bw-row:hover .bw-pin-indicator,.bw-row.menu-open .bw-row-time,.bw-row.menu-open .bw-row-count,.bw-row.menu-open .bw-row-trailing,.bw-row.menu-open .bw-pin-indicator{display:none}',
++      '.bw-row:hover .bw-row-time,.bw-row:hover .bw-row-count,.bw-row:hover .bw-pin-indicator,.bw-row.menu-open .bw-row-time,.bw-row.menu-open .bw-row-count,.bw-row.menu-open .bw-pin-indicator{display:none}',
+       '.bw-row-archived .bw-row-label{color:var(--dsw-alias-label-caption,#8a8a8a)}',
+       '.bw-pin-indicator{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:20px;color:var(--dsw-alias-label-caption,#adb2b8);margin:0 0 0 6px}',
+       '.bw-overflow-row{display:block;width:100%;text-align:left;border:0;background:transparent;color:var(--dsw-alias-label-tertiary,#9a9a9a);font-size:12px;cursor:pointer;padding:4px 6px;font-family:inherit}',
+--- a/tests/smoke.mjs
++++ b/tests/smoke.mjs
+@@ -2192,7 +2192,7 @@
+     'the official row.action seat receives the hook')
+ })
+ 
+-test('alpha.2: sidebar.session.row.trailing renders inside the row, between time and pin', () => {
++test('GUARD-510: row indicators render beside the title and remain visible with hover actions', () => {
+   const text = clientText()
+   // alpha.2 declares a row-inline trailing seat (ui-workspace Rows.tsx:744:
+   // resting cell order time → trailing → pinned). It is where the official
+@@ -2208,18 +2208,17 @@
+     'each occupant renders behind the render-crash boundary')
+   assert.ok(text.includes('ownerProps: { sessionId: node.id }'),
+     'the seat owner receives only the sessionId alpha.2 declares')
+-  // Resting-cell order must mirror Rows.tsx, or the icon lands left of the time.
+-  const timeAt = text.indexOf("className: 'bw-row-time'")
+-  const trailingAt = text.indexOf('        trailingNode,', timeAt)
++  // The owner explicitly requires a persistent indicator beside the title.
++  const labelAt = text.indexOf("className: 'bw-row-label', ref: marquee.titleRef")
++  const trailingAt = text.indexOf('        trailingNode,', labelAt)
++  const timeAt = text.indexOf("className: 'bw-row-time'", labelAt)
+   const pinAt = text.indexOf("className: 'bw-pin-indicator'", timeAt)
+-  assert.ok(timeAt > 0 && trailingAt > timeAt && pinAt > trailingAt,
+-    'trailing must sit between the time cell and the pin marker')
+-  // Same visibility rule as the shipped resting cell: hidden while hover
+-  // actions replace it.
++  assert.ok(labelAt > 0 && trailingAt > labelAt && trailingAt < timeAt && pinAt > timeAt,
++    'indicators must sit directly after the title, before time and pin')
+   assert.ok(text.includes("'.bw-row-trailing{flex:none;display:inline-flex;align-items:center;gap:6px;"),
+-    'the trailing strip needs its resting-cell layout')
+-  assert.ok(text.includes('.bw-row:hover .bw-row-trailing'),
+-    'the trailing strip must yield to the hover actions like time/pin')
++    'the trailing strip retains its noninteractive inline layout')
++  assert.ok(!text.includes('.bw-row:hover .bw-row-trailing') && !text.includes('.bw-row.menu-open .bw-row-trailing'),
++    'indicators must remain visible with hover actions and an open context menu')
+ })
+ 
+ test('collapsed rail add button never reaches startAddFlow before initialization', () => {
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "dsh-better-workspace",
+-  "version": "0.41.0-workain.14-guard508.1",
++  "version": "0.41.0-workain.14-guard510.1",
+   "description": "侧边栏工作区树:按官方磁盘目录嵌套(官方 workspace-tree 语义),可选按名称中的 / 分组(默认关闭,设置里开启);新会话页的工作区选择器同树(同一份视图选项即时同步);添加工作区走官方目录流。Workspace tree for the DSH sidebar: disk-path nesting (official workspace-tree semantics), with optional \"/\"-name grouping (off by default), and the same tree in the New Session workspace picker; add-workspace rides the official directory flow.",
+   "type": "module",
+   "repository": {
+@@ -65,7 +65,7 @@
+     "src/client.group-picker.js"
+   ],
+   "scripts": {
+-    "test": "node --test tests/smoke.mjs tests/operations.mjs tests/service-dom.mjs tests/titles.mjs tests/board.mjs tests/group-tools.mjs tests/group-menu.mjs tests/group-picker.mjs",
++    "test": "node --test tests/smoke.mjs tests/operations.mjs tests/service-dom.mjs tests/titles.mjs tests/board.mjs tests/group-tools.mjs tests/group-menu.mjs tests/group-picker.mjs tests/indicators.mjs",
+     "version": "node -e \"const fs=require('fs');const m=JSON.parse(fs.readFileSync('dsh.plugin.json','utf8'));const v=JSON.parse(fs.readFileSync('package.json','utf8')).version;m.version=v;fs.writeFileSync('dsh.plugin.json',JSON.stringify(m,null,2)+'\\n')\" && git add dsh.plugin.json"
+   },
+   "keywords": [
