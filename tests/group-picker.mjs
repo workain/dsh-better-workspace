@@ -7,7 +7,7 @@ import { chunk, entryHelpers } from './chunks.mjs'
 const plain = value => JSON.parse(JSON.stringify(value))
 const creation = chunk('group-create')
 const Menu = props => React.createElement('div', { 'data-menu-selected': props.selectedId }, props.anchor,
-  props.open ? props.items.map(item => React.createElement('button', { key: item.id, 'data-menu-choice': item.id, onClick: () => props.onSelect(item.id) }, item.label)) : null)
+  props.open ? [...props.items, ...(props.footer || [])].map(item => React.createElement('button', { key: item.id, 'data-menu-choice': item.id, onClick: () => props.onSelect(item.id) }, item.label)) : null)
 const picker = chunk('group-picker', { react: React, '@deepseek-ai/dsh-client-ui-primitives': { Menu } })
 const helpers = entryHelpers(chunk('operations'))
 function fixture() {
@@ -163,5 +163,112 @@ test('DOM hero selector: nested/empty targets, none, workspace reset, failed wri
     workspaceId = 'two'; await act(render)
     assert.ok(trigger(), 'dropdown returns when selecting a workspace with groups')
     assert.equal(trigger().getAttribute('aria-expanded'), 'false', 'old open menu state does not leak across workspaces')
+  } finally { await act(() => root.unmount()); dom.window.close() }
+})
+
+// Modal owns the real focus/Escape layer in production; this double exposes its
+// close command so busy guarding and accessible contents can be verified in DOM.
+const Modal = props => props.open ? React.createElement('div', { role: 'dialog', 'aria-label': props.title },
+  React.createElement('button', { 'aria-label': props.closeLabel, onClick: props.onClose }, '×'), props.children, props.footer) : null
+const Button = ({ variant, ...props }) => React.createElement('button', props)
+
+test('DOM create group: footer only, cancel, validation, nested path, busy guard, assignment and retry', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>')
+  globalThis.window = dom.window; globalThis.document = dom.window.document; globalThis.HTMLElement = dom.window.HTMLElement
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  const root = createRoot(document.getElementById('root'))
+  const rows = { first: { id: 'first', blank: true, title: 'Draft' }, second: { id: 'second', blank: true, title: 'Other' } }
+  const list = { byId: rows }
+  const workspaces = { items: [{ workspaceId: 'one', sessionIds: ['first'] }, { workspaceId: 'two', sessionIds: ['second'] }] }
+  let current = 'first', workspaceId = 'one', createOpen = false, paths = [{ path: 'existing', depth: 0 }], calls = [], closed = 0, gate, fail = false
+  const props = { Menu, Modal, Button, useSessions: select => select(list), useWorkspaces: select => select(workspaces), useStore: select => select({}),
+    currentSessionId: () => current, groupPath: () => '', groupOptions: () => paths, t: key => key,
+    assignSessionGroup: async () => { throw Error('unexpected separate assignment') },
+    onCreateClose: () => { closed++; createOpen = false },
+    normalizeGroupPath: raw => { const parts = raw.trim().split('/').map(part => part.trim()); if (parts.some(part => !part || part === '..')) throw Error('invalid'); return parts.join('/') },
+    createSessionGroup: async (...args) => {
+      calls.push(args); if (gate) await gate
+      if (fail) throw Error('failed')
+      if ((rows[args[0]].title || '') !== args[3]) throw Error('title-changed')
+      paths = [...paths, { path: args[2], depth: 0 }]
+    },
+  }
+  const render = () => root.render(React.createElement(picker.GroupPicker, { ...props, workspaceId, createOpen }))
+  const trigger = () => document.querySelector('[aria-label="heroGroup.label"]')
+  const dialog = () => document.querySelector('[role=dialog]')
+  const button = label => [...dialog().querySelectorAll('button')].find(node => node.textContent === label)
+  const footerOpen = async () => {
+    await act(() => trigger().click())
+    assert.deepEqual([...document.querySelectorAll('[data-menu-choice]')].map(node => node.dataset.menuChoice), ['none', ...paths.map(path => 'group:' + path.path), 'create-group'])
+    await act(() => document.querySelector('[data-menu-choice="create-group"]').click())
+  }
+  const input = async value => {
+    const node = dialog().querySelector('input')
+    // React's test environment is loaded before JSDOM; invoke its registered
+    // change handler to avoid depending on feature detection at module import.
+    const reactProps = node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
+    await act(() => reactProps.onChange({ target: { value } }))
+  }
+  const submit = async () => { await act(() => button('heroGroup.createConfirm').click()) }
+  try {
+    await act(render)
+    assert.equal(document.querySelectorAll('button').length, 1, 'no second creation button beside chip')
+    await footerOpen()
+    assert.equal(dialog().querySelector('label').textContent, 'heroGroup.path')
+    assert.equal(dialog().querySelector('input').hasAttribute('data-modal-autofocus'), true)
+    await act(() => button('cancel').click())
+    assert.equal(dialog(), null); assert.deepEqual(calls, [])
+    await footerOpen(); await submit()
+    assert.equal(dialog().querySelector('[role=alert]').textContent, 'heroGroup.invalidPath')
+    assert.deepEqual(calls, [])
+    await input('parent/../bad'); await submit(); assert.deepEqual(calls, [])
+    await input(' parent / child ')
+    let release; gate = new Promise(resolve => { release = resolve })
+    await submit(); await submit()
+    assert.deepEqual(calls, [['first', 'one', 'parent/child', 'Draft']])
+    assert.equal(button('cancel').disabled, true); assert.equal(dialog().querySelector('input').disabled, true)
+    await act(() => dialog().querySelector('[aria-label=close]').click())
+    assert.ok(dialog(), 'native close command cannot dismiss a pending write')
+    await act(async () => { release(); await gate }); gate = null
+    assert.equal(dialog(), null)
+    assert.equal(document.querySelector('[data-menu-selected]').dataset.menuSelected, 'group:parent/child')
+    assert.equal(closed, 2)
+    await footerOpen(); await input('retry'); fail = true; await submit()
+    assert.equal(dialog().querySelector('[role=alert]').textContent, 'heroGroup.error')
+    assert.equal(dialog().querySelector('input').value, 'retry')
+    fail = false; await submit(); assert.equal(dialog(), null)
+    assert.equal(document.querySelector('[data-menu-selected]').dataset.menuSelected, 'group:retry')
+
+    // No existing groups still has no chip/wrapper; only an explicit external
+    // request from the workspace picker opens the same creation dialog.
+    paths = []; await act(render)
+    assert.equal(trigger(), null); assert.equal(dialog(), null)
+    createOpen = true; await act(render)
+    assert.ok(dialog()); assert.equal(trigger(), null)
+    await input('external/nested'); await submit(); await act(render)
+    assert.equal(dialog(), null)
+    assert.equal(document.querySelector('[data-menu-selected]').dataset.menuSelected, 'group:external/nested')
+
+    await footerOpen(); await input('must-not-overwrite')
+    rows.first.title = 'Fresh external rename'; await act(render); await submit()
+    assert.equal(calls.at(-1)[3], 'Draft', 'expected title belongs to dialog-open snapshot, not submit render')
+    assert.equal(rows.first.title, 'Fresh external rename')
+    assert.equal(dialog().querySelector('[role=alert]').textContent, 'heroGroup.error')
+    await act(() => button('cancel').click())
+
+    await footerOpen(); await input('stale')
+    gate = new Promise(resolve => { release = resolve }); await submit()
+    const oldClosed = closed
+    workspaceId = 'two'; current = 'second'; await act(render)
+    assert.equal(dialog(), null)
+    workspaceId = 'one'; current = 'first'; await act(render)
+    await footerOpen(); await input('new dialog')
+    await act(async () => { release(); await gate }); gate = null
+    assert.equal(closed, oldClosed, 'stale success cannot dismiss a new dialog even after switching back')
+    assert.equal(dialog().querySelector('input').value, 'new dialog')
+    await act(() => button('cancel').click())
+    createOpen = true; await act(render); assert.ok(dialog())
+    current = 'second'; workspaceId = 'two'; await act(render)
+    assert.equal(dialog(), null, 'external request does not reopen on identity change')
   } finally { await act(() => root.unmount()); dom.window.close() }
 })

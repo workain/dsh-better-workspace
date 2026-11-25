@@ -3,6 +3,12 @@ window.__ModuleLoader__.load({
   id: 'dsh-better-workspace', chunk: 'client.operations.js',
   factory: () => {
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+    // The documented slot revision is stable until an occupant is added/removed.
+    // Reading the ledger only on unrelated session renders misses lazy plugins.
+    const slotRevisionSource = (slots, name) => ({
+      getSnapshot: () => slots.getVersion(name),
+      subscribe: listener => slots.subscribe(name, listener),
+    })
     // Never walk disk subtrees when changing a NAME group: those workspaces
     // belong to another physical container even when their labels match.
     const folderMembers = (node) => {
@@ -172,6 +178,6 @@ window.__ModuleLoader__.load({
       }
       return done
     }
-    return { folderMembers, findFolder, folderIdentities, retitle, createRunner, orderPlan, renameSession, subagentCounts }
+    return { slotRevisionSource, folderMembers, findFolder, folderIdentities, retitle, createRunner, orderPlan, renameSession, subagentCounts }
   },
 })

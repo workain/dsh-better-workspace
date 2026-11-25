@@ -19,38 +19,104 @@ window.__ModuleLoader__.load({
     /** The official Menu owns keyboard navigation, portal, and themed surfaces.
      * Every depth is an explicit target, including declared empty groups. */
     function GroupPicker(props) {
-      const { Menu, workspaceId, useSessions, useStore, useWorkspaces, groupOptions, currentSessionId, groupPath, assignSessionGroup, t } = props
+      const { Menu, Modal, Button, workspaceId, useSessions, useStore, useWorkspaces, groupOptions, currentSessionId, groupPath, assignSessionGroup, createSessionGroup, normalizeGroupPath, createOpen, onCreateClose, t } = props
       const list = useSessions(state => state)
       const workspaces = useWorkspaces(state => state)
       const state = useStore(value => value)
       const id = currentSessionId(list)
       const row = id && list.byId[id]
       const workspace = workspaces.items.find(item => item.workspaceId === workspaceId)
-      const ready = row && row.blank === true && workspace && workspace.sessionIds.includes(id)
+      const ready = row && row.blank === true && row.origin !== 'subagent' && workspace && workspace.sessionIds.includes(id)
+        && !(workspaces.archivedSessionIds || []).includes(id)
       const paths = React.useMemo(() => groupOptions(list, workspace, state), [list, workspace, state, groupOptions])
       const [choice, setChoice] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(false)
       const [open, setOpen] = React.useState(false)
       const identity = String(workspaceId) + ':' + String(id)
-      const identityRef = React.useRef(identity)
-      identityRef.current = identity
-      React.useEffect(() => { setChoice(null); setBusy(false); setError(false); setOpen(false) }, [identity])
+      const identityRef = React.useRef({ identity })
+      // An identity generation also rejects a result after switching away and back.
+      if (identityRef.current.identity !== identity) identityRef.current = { identity }
+      const generation = identityRef.current
+      const [dialog, setDialog] = React.useState(null)
+      const dialogRef = React.useRef(null)
+      const writeRef = React.useRef(null)
+      const externalRef = React.useRef(false)
+      const updateDialog = next => { dialogRef.current = next; setDialog(next) }
+      const closeCreate = () => {
+        if (writeRef.current && writeRef.current.generation === generation) return
+        updateDialog(null)
+        if (onCreateClose) onCreateClose()
+      }
+      const openCreate = () => {
+        if (!ready || busy || writeRef.current || state.sessionTitleSlash === false || !Modal || !createSessionGroup || !normalizeGroupPath) return
+        setOpen(false)
+        updateDialog({ generation, id, workspaceId, expectedTitle: typeof row.title === 'string' ? row.title : '', raw: '', error: null, busy: false })
+      }
+      React.useEffect(() => {
+        setChoice(null); setBusy(false); setError(false); setOpen(false)
+        updateDialog(null); writeRef.current = null
+      }, [identity])
+      React.useEffect(() => {
+        const requested = !!createOpen && !externalRef.current
+        externalRef.current = !!createOpen
+        if (requested) openCreate()
+      }, [createOpen, identity])
+      const mountedRef = React.useRef(true)
+      React.useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+      const submitCreate = () => {
+        const draft = dialogRef.current
+        if (!draft || draft.generation !== identityRef.current || writeRef.current) return
+        let path
+        try {
+          path = normalizeGroupPath(draft.raw)
+          if (!path) throw Error('empty-path')
+        } catch (_) { updateDialog({ ...draft, error: 'heroGroup.invalidPath' }); return }
+        const operation = { generation: draft.generation }
+        writeRef.current = operation
+        updateDialog({ ...draft, busy: true, error: null })
+        Promise.resolve().then(() => createSessionGroup(draft.id, draft.workspaceId, path, draft.expectedTitle)).then(() => {
+          if (!mountedRef.current || identityRef.current !== draft.generation || writeRef.current !== operation) return
+          setChoice({ identity, path, before: draft.expectedTitle })
+          updateDialog(null)
+          if (onCreateClose) onCreateClose()
+        }, () => {
+          if (mountedRef.current && identityRef.current === draft.generation && writeRef.current === operation) updateDialog({ ...draft, busy: false, error: 'heroGroup.error' })
+        }).finally(() => { if (writeRef.current === operation) writeRef.current = null })
+      }
       const value = choice && choice.identity === identity && (row && row.title || '') === choice.before
         ? choice.path : (ready ? groupPath(row) : '')
       const allPaths = value && !paths.some(option => option.path === value) ? [{ path: value, depth: 0 }, ...paths] : paths
       const change = path => {
-        if (!ready || busy) return
-        const target = identity
+        if (!ready || busy || writeRef.current || dialogRef.current) return
+        const target = generation
         setOpen(false); setBusy(true); setError(false)
         const expectedTitle = typeof row.title === 'string' ? row.title : ''
         Promise.resolve().then(() => assignSessionGroup(id, workspaceId, path, expectedTitle)).then(() => {
-          if (identityRef.current === target) setChoice({ identity: target, path, before: expectedTitle })
+          if (identityRef.current === target) setChoice({ identity, path, before: expectedTitle })
         }, () => { if (identityRef.current === target) setError(true) }).finally(() => {
           if (identityRef.current === target) setBusy(false)
         })
       }
-      if (state.sessionTitleSlash === false || paths.length === 0) return null
+      const activeDialog = dialog && dialog.generation === generation && state.sessionTitleSlash !== false ? dialog : null
+      const modal = activeDialog && Modal ? E(Modal, {
+        open: true, title: t('heroGroup.createTitle'), closeLabel: t('close'), onClose: closeCreate,
+        footer: E('div', { className: 'bw-modal-actions' },
+          E(Button || 'button', { type: 'button', variant: 'outline', disabled: activeDialog.busy, onClick: closeCreate }, t('cancel')),
+          E(Button || 'button', { type: 'button', variant: 'primary', disabled: activeDialog.busy, onClick: submitCreate }, t('heroGroup.createConfirm')),
+        ),
+      }, E('div', { className: 'bw-modal-body' },
+        E('label', { className: 'bw-field' },
+          E('span', null, t('heroGroup.path')),
+          E('input', { className: 'bw-input', 'data-modal-autofocus': true, value: activeDialog.raw, disabled: activeDialog.busy,
+            'aria-invalid': !!activeDialog.error,
+            onChange: event => updateDialog({ ...activeDialog, raw: event.target.value, error: null }),
+            onKeyDown: event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); submitCreate() } },
+          }),
+        ),
+        activeDialog.error ? E('div', { role: 'alert', style: { color: 'var(--dsw-alias-text-error)' } }, t(activeDialog.error)) : null,
+      )) : null
+      if (state.sessionTitleSlash === false || paths.length === 0) return modal
       const noneId = 'none'
       const items = [{ id: noneId, label: t('heroGroup.none') }, ...allPaths.map(option => ({
         id: 'group:' + option.path, label: E('span', { style: { paddingInlineStart: option.depth * 12 } }, option.path),
@@ -67,7 +133,8 @@ window.__ModuleLoader__.load({
         `),
         E(Menu, { open: open && !!ready && !busy, portal: true, dense: true, items,
           selectedId: value ? 'group:' + value : noneId, onClose: () => setOpen(false),
-          onSelect: target => change(target === noneId ? '' : target.slice(6)),
+          ...(Modal && createSessionGroup && normalizeGroupPath ? { footer: [{ id: 'create-group', label: t('heroGroup.create') }] } : {}),
+          onSelect: target => target === 'create-group' ? openCreate() : change(target === noneId ? '' : target.slice(6)),
           anchor: E('button', { type: 'button', className: 'bw-hero-group-chip', disabled: !ready || busy,
             'aria-label': t('heroGroup.label'), 'aria-haspopup': 'menu', 'aria-expanded': open && !!ready && !busy,
             title: t('heroGroup.hint'), onClick: () => setOpen(current => !current) },
@@ -77,6 +144,7 @@ window.__ModuleLoader__.load({
           ),
         }),
         error ? E('span', { role: 'alert', style: { color: 'var(--dsw-alias-text-error)' } }, t('heroGroup.error')) : null,
+        modal,
       )
     }
     return { GroupPicker, options }

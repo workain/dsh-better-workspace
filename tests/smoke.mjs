@@ -2192,7 +2192,7 @@ test('rc.1: shipped seat occupants receive the global useSessionAccess hook', ()
     'the official row.action seat receives the hook')
 })
 
-test('alpha.2: sidebar.session.row.trailing renders inside the row, between time and pin', () => {
+test('GUARD-510: row indicators render beside the title and remain visible with hover actions', () => {
   const text = clientText()
   // alpha.2 declares a row-inline trailing seat (ui-workspace Rows.tsx:744:
   // resting cell order time → trailing → pinned). It is where the official
@@ -2208,18 +2208,17 @@ test('alpha.2: sidebar.session.row.trailing renders inside the row, between time
     'each occupant renders behind the render-crash boundary')
   assert.ok(text.includes('ownerProps: { sessionId: node.id }'),
     'the seat owner receives only the sessionId alpha.2 declares')
-  // Resting-cell order must mirror Rows.tsx, or the icon lands left of the time.
-  const timeAt = text.indexOf("className: 'bw-row-time'")
-  const trailingAt = text.indexOf('        trailingNode,', timeAt)
+  // The owner explicitly requires a persistent indicator beside the title.
+  const labelAt = text.indexOf("className: 'bw-row-label', ref: marquee.titleRef")
+  const trailingAt = text.indexOf('        trailingNode,', labelAt)
+  const timeAt = text.indexOf("className: 'bw-row-time'", labelAt)
   const pinAt = text.indexOf("className: 'bw-pin-indicator'", timeAt)
-  assert.ok(timeAt > 0 && trailingAt > timeAt && pinAt > trailingAt,
-    'trailing must sit between the time cell and the pin marker')
-  // Same visibility rule as the shipped resting cell: hidden while hover
-  // actions replace it.
+  assert.ok(labelAt > 0 && trailingAt > labelAt && trailingAt < timeAt && pinAt > timeAt,
+    'indicators must sit directly after the title, before time and pin')
   assert.ok(text.includes("'.bw-row-trailing{flex:none;display:inline-flex;align-items:center;gap:6px;"),
-    'the trailing strip needs its resting-cell layout')
-  assert.ok(text.includes('.bw-row:hover .bw-row-trailing'),
-    'the trailing strip must yield to the hover actions like time/pin')
+    'the trailing strip retains its noninteractive inline layout')
+  assert.ok(!text.includes('.bw-row:hover .bw-row-trailing') && !text.includes('.bw-row.menu-open .bw-row-trailing'),
+    'indicators must remain visible with hover actions and an open context menu')
 })
 
 test('collapsed rail add button never reaches startAddFlow before initialization', () => {
