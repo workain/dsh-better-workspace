@@ -50,23 +50,32 @@ window.__ModuleLoader__.load({
           if (identityRef.current === target) setBusy(false)
         })
       }
-      if (state.sessionTitleSlash === false) return null
+      if (state.sessionTitleSlash === false || paths.length === 0) return null
       const noneId = 'none'
       const items = [{ id: noneId, label: t('heroGroup.none') }, ...allPaths.map(option => ({
         id: 'group:' + option.path, label: E('span', { style: { paddingInlineStart: option.depth * 12 } }, option.path),
       }))]
-      return E('span', { className: 'bw-hero-group', style: { display: 'inline-flex', flexDirection: 'column', gap: 3, maxWidth: 260 } },
+      return E('span', { className: 'bw-hero-group', style: { display: 'inline-flex', alignItems: 'center', minWidth: 0, maxWidth: 'min(100%, 360px)' } },
+        E('style', null, `
+          .bw-hero-group-chip { display:inline-flex; align-items:center; gap:4px; max-width:min(100%, 360px); min-height:28px; padding:0 8px; border:none; border-radius:var(--dsw-radius-sm); background:transparent; color:var(--dsw-alias-label-primary); font-family:inherit; font-size:13px; line-height:20px; font-weight:500; cursor:pointer; }
+          .bw-hero-group-chip[aria-expanded='true'] { background:var(--dsw-alias-interactive-bg-hover); }
+          @media (hover:hover) { .bw-hero-group-chip:not(:disabled):hover { background:var(--dsw-alias-interactive-bg-hover); } }
+          .bw-hero-group-chip:disabled { cursor:default; }
+          .bw-hero-group-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .bw-hero-group-icon { display:inline-flex; flex:none; color:var(--dsw-alias-label-primary); }
+          .bw-hero-group-chevron { display:inline-flex; flex:none; color:var(--dsw-alias-label-caption); }
+        `),
         E(Menu, { open: open && !!ready && !busy, portal: true, dense: true, items,
           selectedId: value ? 'group:' + value : noneId, onClose: () => setOpen(false),
           onSelect: target => change(target === noneId ? '' : target.slice(6)),
-          anchor: E('button', { type: 'button', className: 'bw-select', disabled: !ready || busy,
+          anchor: E('button', { type: 'button', className: 'bw-hero-group-chip', disabled: !ready || busy,
             'aria-label': t('heroGroup.label'), 'aria-haspopup': 'menu', 'aria-expanded': open && !!ready && !busy,
             title: t('heroGroup.hint'), onClick: () => setOpen(current => !current) },
-            E('span', { className: 'bw-select-label' }, t('heroGroup.label') + ': ' + (value || t('heroGroup.none'))),
-            E('span', { 'aria-hidden': true }, '\u25be'),
+            props.folderIcon ? E('span', { className: 'bw-hero-group-icon', 'aria-hidden': true }, props.folderIcon) : null,
+            E('span', { className: 'bw-hero-group-label' }, value || t('heroGroup.none')),
+            E('span', { className: 'bw-hero-group-chevron', 'aria-hidden': true }, props.chevronIcon || '\u25be'),
           ),
         }),
-        E('small', { style: { color: 'var(--dsw-alias-text-tertiary)', fontSize: 10, lineHeight: 1.3 } }, t('heroGroup.hint')),
         error ? E('span', { role: 'alert', style: { color: 'var(--dsw-alias-text-error)' } }, t('heroGroup.error')) : null,
       )
     }

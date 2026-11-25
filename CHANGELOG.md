@@ -3,6 +3,13 @@
 > 倒序排列,新版本条目在最上面。条目格式:`## vX.Y.Z — YYYY-MM-DD` + 类型(feat / fix / docs / chore)+ 要点 + 相关链接。
 > 纪律见 AGENTS.md「变更记录纪律」:发版前先更新本文件并随版本提交;事故复盘、复现与真机验证记录也记在这里。
 
+## v0.41.0-workain.14-guard508.1 — 2026-11-25
+
+- fix: match the New Session group dropdown to the native workspace chip: transparent compact trigger, same spacing/type/icons and hover state, no field-name prefix or caption below.
+- fix: hide the group dropdown entirely when the selected workspace contains no groups; nested and declared-empty groups still count.
+- test: DOM regressions cover compact markup, absent caption, hiding and restoring across workspace changes. Existing group assignment semantics remain unchanged.
+- task: https://tracker.yandex.ru/GUARD-508
+
 ## v0.41.0-workain.13-guard507.1 — 2026-11-25
 
 - fix: restore session-group context menus on DSH rc.5 using the supported `anchorPoint` / `anchorRef` Menu API, with keyboard focus restoration and a discoverable group ⋯ button.

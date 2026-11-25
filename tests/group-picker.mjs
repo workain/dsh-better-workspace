@@ -119,11 +119,11 @@ test('DOM hero selector: nested/empty targets, none, workspace reset, failed wri
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   const root = createRoot(document.getElementById('root'))
   const list = { byId: { first: { id: 'first', blank: true }, second: { id: 'second', blank: true } } }
-  const workspaces = { items: [{ workspaceId: 'one', sessionIds: ['first'] }, { workspaceId: 'two', sessionIds: ['second'] }] }
+  const workspaces = { items: [{ workspaceId: 'one', sessionIds: ['first'] }, { workspaceId: 'two', sessionIds: ['second'] }, { workspaceId: 'empty', sessionIds: [] }] }
   let current = 'first', workspaceId = 'one', reject = false, gate, calls = []
   const props = { Menu, useSessions: selector => selector(list), useWorkspaces: selector => selector(workspaces), useStore: selector => selector({}),
     currentSessionId: () => current, groupPath: () => '', t: key => key,
-    groupOptions: (_, workspace) => workspace.workspaceId === 'one' ? [{ path: 'p', depth: 0 }, { path: 'p/empty', depth: 1 }] : [{ path: 'other', depth: 0 }],
+    groupOptions: (_, workspace) => workspace.workspaceId === 'one' ? [{ path: 'p', depth: 0 }, { path: 'p/empty', depth: 1 }] : workspace.workspaceId === 'two' ? [{ path: 'other', depth: 0 }] : [],
     assignSessionGroup: async (...args) => { calls.push(args); if (gate) await gate; if (reject) throw Error('write failed') },
   }
   const render = () => root.render(React.createElement(picker.GroupPicker, { ...props, workspaceId }))
@@ -135,7 +135,12 @@ test('DOM hero selector: nested/empty targets, none, workspace reset, failed wri
     await act(() => document.querySelector('[data-menu-choice="' + (value ? 'group:' + value : 'none') + '"]').click())
   }
   try {
-    await act(render); await open()
+    await act(render)
+    assert.equal(trigger().className, 'bw-hero-group-chip')
+    assert.equal(trigger().textContent, 'heroGroup.none▾', 'only the selected value and chevron, no field-name prefix')
+    assert.equal(document.querySelector('small'), null, 'no caption below the dropdown')
+    assert.equal(document.querySelector('.bw-select'), null, 'does not inherit the boxed settings select style')
+    await open()
     assert.deepEqual([...document.querySelectorAll('[data-menu-choice]')].map(row => row.getAttribute('data-menu-choice')), ['none', 'group:p', 'group:p/empty'])
     await choose('p/empty'); assert.equal(selected(), 'group:p/empty')
     await choose(''); assert.equal(selected(), 'none')
@@ -152,5 +157,11 @@ test('DOM hero selector: nested/empty targets, none, workspace reset, failed wri
     assert.equal(selected(), 'none')
     await open()
     assert.deepEqual([...document.querySelectorAll('[data-menu-choice]')].map(row => row.getAttribute('data-menu-choice')), ['none', 'group:other'])
+    workspaceId = 'empty'; await act(render)
+    assert.equal(trigger(), null, 'no dropdown when selected workspace has no groups')
+    assert.equal(document.querySelector('.bw-hero-group'), null, 'no empty layout wrapper either')
+    workspaceId = 'two'; await act(render)
+    assert.ok(trigger(), 'dropdown returns when selecting a workspace with groups')
+    assert.equal(trigger().getAttribute('aria-expanded'), 'false', 'old open menu state does not leak across workspaces')
   } finally { await act(() => root.unmount()); dom.window.close() }
 })
