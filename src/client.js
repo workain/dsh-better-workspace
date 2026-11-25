@@ -3600,7 +3600,8 @@ window.__ModuleLoader__.load({
         : null
       return E(React.Fragment, null,
         props.groupPickerComponent ? E(props.groupPickerComponent, {
-          Menu: ui.Menu, workspaceId: selectedId, useSessions: props.useSessions, useWorkspaces,
+          Menu: ui.Menu, folderIcon: icon('IconFolderOpenRegular', 16), chevronIcon: icon('IconChevronDownOutlineRegular', 12),
+          workspaceId: selectedId, useSessions: props.useSessions, useWorkspaces,
           useStore, groupOptions: props.groupOptions, currentSessionId: mainSessionIdOf,
           groupPath: props.groupPath, assignSessionGroup: props.assignSessionGroup, t,
         }) : null,
