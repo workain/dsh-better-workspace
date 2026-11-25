@@ -8,7 +8,7 @@ window.__ModuleLoader__.load({
     const resolve = (workspace, id, byId, archived) => {
       if (!id) return { reason: 'unassigned' }
       const s = byId && byId[id]
-      if (!s) return { reason: 'missing' }
+      if (!s || s.blank === true) return { reason: 'missing' }
       if (!workspace || !(workspace.sessionIds || []).includes(id) || s.origin === 'subagent') return { reason: 'foreign' }
       if (archived.has(id)) return { reason: 'archived' }
       return { id, summary: s }
@@ -23,7 +23,7 @@ window.__ModuleLoader__.load({
         attach(next) { if (off) off(); form = next; off = next ? next.subscribe(publish) : null; publish() },
         async save(workspaceId, sessionId, expectedRevision, bindingKey = workspaceId) {
           if (!form || state.status !== 'ready' || !state.writable) throw new Error('settings-unavailable')
-          if (sessionId && !await validate(workspaceId, sessionId)) throw new Error('session-unavailable')
+          if (sessionId && !await validate(workspaceId, sessionId, bindingKey)) throw new Error('session-unavailable')
           // Path operation + explicit namespace revision prevents one browser
           // overwriting another browser's binding using a stale map snapshot.
           const accepted = await form.mutate([{ op: sessionId ? 'set' : 'unset',

@@ -259,8 +259,8 @@ test('v0.39.2: host title provenance, not title text, decides grouping (issue #1
   assert.match(text, /const groupsAllowedFor = \(summary\) => \{/)
   assert.match(text, /source === undefined \|\| source === 'user'/)
   // Both row families (ungrouped and inside a workspace) carry the decision.
-  assert.equal((text.match(/allowGroups: groupsAllowedFor\(summary\)/g) || []).length, 2,
-    'ungrouped and workspace session rows both carry provenance')
+  assert.equal((text.match(/allowGroups: groupsAllowedFor\(summary\)/g) || []).length, 3,
+    'ungrouped, workspace and manager-scope session rows carry provenance')
   assert.match(text, /splitTitleSegs\(row\.title, row\.allowGroups !== false\)/)
   assert.match(text, /if \(session\.allowGroups === false\) continue/,
     'opaque titles are not offered as group suggestions')
@@ -321,7 +321,7 @@ test('alpha.3: the official context menu owns session/workspace rows (v0.38.0)',
   assert.match(text, /face\.open\(\{[\s\S]{0,80}kind: 'session'/)
   assert.match(text, /face\.open\(\{[\s\S]{0,80}kind: 'workspace'/)
   assert.match(text, /console\.warn\('\[dsh-better-workspace\] official context menu open failed; using local menu'/)
-  assert.match(text, /setCtx\(\{ kind, payload, \.\.\.point \}\)/)
+  assert.match(text, /setCtx\(\{ kind, payload, \.\.\.point, trigger: e && e\.currentTarget \}\)/)
   // Keyboard parity: the same trigger as the shared menu (ContextMenu or
   // Shift+F10), attached to all four row families, and a keyboard point
   // anchored at the focused row instead of the viewport corner.
@@ -473,9 +473,12 @@ test('sessionTitleOf: wire title wins, remembered fills the cold-restart window'
   const start = text.indexOf('const sessionTitleOf =')
   const end = text.indexOf('/**', start)
   assert.ok(start !== -1 && end !== -1, 'sessionTitleOf not found')
-  const { sessionTitleOf } = new Function(text.slice(start, end) + '\nreturn { sessionTitleOf }')()
+  const provenance = text.slice(text.indexOf('const TITLE_SOURCE_KEY'), text.indexOf('const splitPlainSegs'))
+  const { sessionTitleOf } = new Function(provenance + text.slice(start, end) + '\nreturn { sessionTitleOf }')()
   const t = (k) => k
-  assert.equal(sessionTitleOf({ blank: true }, t, 'x'), 'session.new', 'blank stays New Session')
+  assert.equal(sessionTitleOf({ blank: true }, t, 'x'), 'session.new', 'unassigned blank stays New Session')
+  assert.equal(sessionTitleOf({ blank: true, title: 'a/New session', projectionValues: { 'betterWorkspace/titleSource': 'user' } }, t), 'a/New session', 'explicit group choice remains visible before the first prompt')
+  assert.equal(sessionTitleOf({ blank: true, title: 'a/Automatic', projectionValues: { 'betterWorkspace/titleSource': 'provider' } }, t), 'session.new', 'automatic blank titles do not create groups')
   assert.equal(sessionTitleOf({ title: 'wire/real' }, t, 'old/name'), 'wire/real', 'wire title beats memory')
   assert.equal(sessionTitleOf({ displayTitle: 'basename' }, t, 'web/前端'), 'web/前端', 'remembered beats the basename fallback')
   // v0.36.14 (issue #16): an unnamed row renders the official Untitled label.
@@ -1091,7 +1094,9 @@ test('context menu: official alignment via the workspace dictionary (0.14.0)', (
   assert.match(text, /deliberately NOT styled destructive/)
   // Rendered through the official primitives Menu, positioned by the event.
   assert.match(text, /typeof ui\.Menu === 'function'\) \? E\(ui\.Menu/)
-  assert.match(text, /getAnchorRect: \(\) => new DOMRect\(ctx\.x, ctx\.y, 0, 0\)/)
+  assert.match(text, /anchorPoint: \{ x: ctx\.x, y: ctx\.y \}/)
+  assert.match(text, /contextual: true/)
+  assert.match(text, /returnFocus: \(\) => ctx\.trigger \|\| null/)
   // dsh 0.2.1-alpha.5's fifth official entry rides after archive (order 450):
   // the clipboard write is feature-probed on the host primitive, so the whole
   // row hides where the primitives lack it.
@@ -2248,9 +2253,9 @@ test('issue #13: local reads and writes ride the PRIVATE store instance', () => 
     'both seats must rename the injected props')
   assert.equal((text.match(/const actions = localStoreFace && localStoreFace.actions \? localStoreFace\.actions : injectedActions/g) || []).length, 2,
     'both seats must rebind actions to the private face')
-  // The face travels through BOTH inject faces as a stable getter.
-  assert.equal((text.match(/localStore: \(\) => \(\{ useStore: useViewStore, actions: viewInstance.actions \}\)/g) || []).length, 2,
-    'both inject faces must carry the private store getter')
+  // The hero group selector now shares the same private store too.
+  assert.equal((text.match(/localStore: \(\) => \(\{ useStore: useViewStore, actions: viewInstance.actions \}\)/g) || []).length, 3,
+    'browser, settings and hero inject faces carry the private store getter')
 })
 
 /* ------------------------------ v0.36.0 ------------------------------ */

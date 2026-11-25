@@ -3,6 +3,15 @@
 > 倒序排列,新版本条目在最上面。条目格式:`## vX.Y.Z — YYYY-MM-DD` + 类型(feat / fix / docs / chore)+ 要点 + 相关链接。
 > 纪律见 AGENTS.md「变更记录纪律」:发版前先更新本文件并随版本提交;事故复盘、复现与真机验证记录也记在这里。
 
+## v0.41.0-workain.13-guard507.1 — 2026-11-25
+
+- fix: restore session-group context menus on DSH rc.5 using the supported `anchorPoint` / `anchorRef` Menu API, with keyboard focus restoration and a discoverable group ⋯ button.
+- fix: group managing-session assignment no longer falls through the single-session branch; opening and saving validate the exact recursive group, current membership, explicit binding and availability.
+- feat: create a fresh session directly inside a group, create a subgroup, and select nested/empty groups or no group in the New Session hero of the selected workspace.
+- note: group choice is an explicit user-title edit; automatic naming is disabled. Existing sessions and group settings are not migrated during installation.
+- test: executable menu/DOM and session-lifecycle regressions added. Visual verification requires the owner's browser; no browser-control tool is available in this session.
+- task: https://tracker.yandex.ru/GUARD-507
+
 ## v0.41.0-workain.11 — 2026-11-11 (candidate)
 
 - feat: the existing managing-session picker now also binds a recursive session group by exact `workspaceId + groupPath`; the Board integration receives the group's exact member IDs, including archived/age-hidden members, and refreshes the read-only scope when membership changes.

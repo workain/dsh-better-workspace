@@ -404,6 +404,9 @@ window.__ModuleLoader__.load({
 
     const sessionTitleOf = (summary, t, rememberedTitle) => {
       if (!summary) return ''
+      // Explicit group selection names a blank before its first message.
+      // Honour that durable user title so the current blank lands in its group.
+      if (summary.blank && titleSourceOf(summary) === 'user' && summary.title) return String(summary.title)
       if (summary.blank) return t('session.new')
       if (summary.title) return String(summary.title)
       // Cold-restart window: the wire serves only the projection cache, so a
@@ -2494,6 +2497,10 @@ window.__ModuleLoader__.load({
         pulse ? E(PulseGlow, { state: pulse }, typeof ui.StateDot === 'function' ? E(ui.StateDot, { state: pulse, size: 10 }) : null) : null,
         E('span', { className: 'bw-row-label' }, name),
         count > 0 ? E('span', { className: 'bw-row-count' }, String(count)) : null,
+        E('span', { className: 'bw-row-actions' }, E('button', {
+          type: 'button', className: 'bw-row-btn', title: t('group.actions'), 'aria-label': t('group.actions'),
+          onClick: e => { e.stopPropagation(); onContextMenu(e) },
+        }, '⋯')),
       )
     }
 
@@ -3399,7 +3406,8 @@ window.__ModuleLoader__.load({
     function HeroWorkspacePicker(props) {
       const t = typeof props.t === 'function' ? props.t : (key => key)
       const useWorkspaces = props.useWorkspaces
-      const useStore = props.useStore
+      const privateStore = typeof props.localStore === 'function' ? props.localStore() : null
+      const useStore = privateStore ? privateStore.useStore : props.useStore
       const useDirectoryFlow = props.useDirectoryFlow
       // Hook order must not depend on the injection face arriving: the fallback
       // is a plain function (not a hook), so both branches call the same way.
@@ -3591,6 +3599,11 @@ window.__ModuleLoader__.load({
         }, E('div', { className: 'bw-modal-body' }, E('div', { role: 'alert' }, errorText)))
         : null
       return E(React.Fragment, null,
+        props.groupPickerComponent ? E(props.groupPickerComponent, {
+          Menu: ui.Menu, workspaceId: selectedId, useSessions: props.useSessions, useWorkspaces,
+          useStore, groupOptions: props.groupOptions, currentSessionId: mainSessionIdOf,
+          groupPath: props.groupPath, assignSessionGroup: props.assignSessionGroup, t,
+        }) : null,
         menuReady ? E(ui.Menu, {
           open: menuOpen,
           // portal mode anchored on the owner's chip: the menu is the popover,
@@ -3601,7 +3614,7 @@ window.__ModuleLoader__.load({
           portal: true,
           dense: true,
           side: 'bottom',
-          getAnchorRect: () => (anchorRef && anchorRef.current ? anchorRef.current.getBoundingClientRect() : null),
+          anchorRef,
           onClose: () => { if (typeof onClose === 'function') onClose() },
           onSelect: (id) => { if (id === HERO_ADD_ID) openFlow() },
         }, rows) : null,
@@ -3628,7 +3641,7 @@ window.__ModuleLoader__.load({
         shippedBrowserFace, scheduleSeatReader, seatEntriesReader,
         officialT,
         presetFaceOf,
-        contextMenuFaceOf, setMenuBridge, bindingStore, refreshCatalog, readTitles, workspaceBoardActions,
+        contextMenuFaceOf, setMenuBridge, bindingStore, refreshCatalog, readTitles, workspaceBoardActions, startSessionInGroup,
         t,
       } = props
       // Issue #13: local reads and writes go through OUR store instance, never
@@ -4486,7 +4499,7 @@ window.__ModuleLoader__.load({
         return rect ? { x: rect.left, y: rect.bottom } : { x, y }
       }
       const openCtx = (kind, payload, e) => {
-        if (e) e.preventDefault()
+        if (e) { e.preventDefault(); e.stopPropagation() }
         const point = menuPointOf(e)
         // dsh 0.2.2-alpha.3: session and workspace are official target
         // families, so the shared popup owns their entries (official ones
@@ -4519,7 +4532,7 @@ window.__ModuleLoader__.load({
             }
           }
         }
-        setCtx({ kind, payload, ...point })
+        setCtx({ kind, payload, ...point, trigger: e && e.currentTarget })
       }
 
       // Session-action surface (v0.20.0, official mirror): the right-click
@@ -6578,6 +6591,50 @@ window.__ModuleLoader__.load({
           submenu: options.map((option) => ({ id: option.id, label: option.label })),
         }]
       }
+      // Resolve group managers from all members, not the filtered sidebar:
+      // age/search/archived view options must not silently change the binding.
+      const managerScope = (workspaceId, path, authoritativeRows) => {
+        const workspace = (mutationState.current?.items || items || []).find(w => w.workspaceId === workspaceId)
+        if (!workspace) return null
+        if (path === undefined) return workspace
+        const rows = authoritativeRows ? authoritativeRows.filter(row => workspace.sessionIds.includes(row.id)) : (workspace.sessionIds || []).flatMap(id => {
+          const summary = list?.byId?.[id]
+          return summary && summary.origin !== 'subagent'
+            ? [{ id, title: rowTitleOf(id, summary, false), allowGroups: groupsAllowedFor(summary) }] : []
+        })
+        const group = findSessionGroup(buildSessionTree(rows, true, sessFolders, workspaceId), path)
+        return { ...workspace, sessionIds: group ? collectSessionRows(group).map(row => row.id) : [] }
+      }
+      const openManager = async (workspaceId, path) => {
+        const key = path === undefined ? workspaceId : 'group:' + workspaceId + ':' + path
+        const liveBindings = () => bindingStore.getSnapshot().value?.serviceSessions || {}
+        const id = liveBindings()[key]
+        if (!id) {
+          const workspace = managerScope(workspaceId, path)
+          if (workspace) setDialog({ kind: 'service-binding', workspace, bindingKey: key })
+          else setErrorText(t('service.openError'))
+          return
+        }
+        try {
+          const workspace = managerScope(workspaceId)
+          const rows = await readTitles(workspaceId, path === undefined ? [id] : workspace.sessionIds)
+          const row = rows.find(row => row.id === id)
+          const scope = managerScope(workspaceId, path, rows.filter(row => !row.error).map(row => ({ ...row, allowGroups: row.sourceKind === 'user' })))
+          const live = mutationState.current
+          const target = serviceFeature.resolve(scope, id, live?.list?.byId || list?.byId, new Set(live?.archivedSessionIds || [...archivedSet]))
+          if (!row?.eligible || row.error || liveBindings()[key] !== id || !target.id) throw Error('unavailable')
+          open(id)
+        } catch { setErrorText(t('service.openError')) }
+      }
+      const startInGroup = async (workspaceId, path) => {
+        try {
+          if (typeof startSessionInGroup !== 'function') throw Error('unavailable')
+          await startSessionInGroup(workspaceId, path)
+          actions.setSessionsExpanded(workspaceId, true)
+          const segments = splitTitleSegs(path)
+          for (let i = 1; i <= segments.length; i++) actions.setSessionGroupExpanded(workspaceId + '|' + segments.slice(0, i).join('/'), true)
+        } catch { setErrorText(t('group.createError')) }
+      }
       const boardActions = (workspaceId) => typeof workspaceBoardActions === 'function'
         ? workspaceBoardActions(workspaceId, t, fail) : []
       const menuEntries = () => {
@@ -6630,7 +6687,12 @@ window.__ModuleLoader__.load({
           return sessionMenuEntriesFor(ctx.payload || {})
         }
         return [
+          ...(bindingStore.getSnapshot().value?.serviceSessions?.['group:' + ctx.payload.workspaceId + ':' + ctx.payload.path]
+            ? [{ id: 'open-manager', label: t('service.open') }] : []),
           { id: 'service-binding', label: t('service.choose') },
+          { id: 'new-group-session', label: t('group.newSession'), icon: icon('IconPlusOutlineRegular', 16) },
+          { id: 'new-subgroup', label: t('group.newSubgroup'), icon: icon('IconFolderOpenOutline16', 16) },
+          { type: 'separator', id: 'bw-group-sep' },
           { id: 'rename-sgroup', label: t('menu.renameSgroup'), icon: icon('IconEditOutline16', 16) },
           ...(ctx.payload && ctx.payload.empty ? [deleteSgroupEntry] : []),
           ...sgroupItems,
@@ -6668,10 +6730,16 @@ window.__ModuleLoader__.load({
           else fail(t('board.failed'))
           return
         }
+        if (kind === 'sgroup' && id === 'open-manager') { void openManager(payload.workspaceId, payload.path); return }
+        if (kind === 'sgroup' && id === 'new-group-session') { void startInGroup(payload.workspaceId, payload.path); return }
+        if (kind === 'sgroup' && id === 'new-subgroup') { setDialog({ kind: 'subgroup-new', target: payload }); return }
         if (id === 'service-binding') {
-          const workspace = kind === 'workspace' ? (items || []).find(w => w.workspaceId === payload.workspaceId)
-            : (items || []).find(w => (w.sessionIds || []).includes(payload.id))
-          if (workspace) setDialog({ kind: 'service-binding', workspace, initialSessionId: kind === 'session' ? payload.id : undefined })
+          const workspace = kind === 'sgroup' ? managerScope(payload.workspaceId, payload.path)
+            : kind === 'workspace' ? (items || []).find(w => w.workspaceId === payload.workspaceId)
+              : (items || []).find(w => (w.sessionIds || []).includes(payload.id))
+          if (workspace) setDialog({ kind: 'service-binding', workspace,
+            ...(kind === 'sgroup' ? { bindingKey: 'group:' + payload.workspaceId + ':' + payload.path } : {}),
+            initialSessionId: kind === 'session' ? payload.id : undefined })
           return
         }
         if (id === 'move-group') {
@@ -6685,10 +6753,6 @@ window.__ModuleLoader__.load({
         }
         else if (kind === 'folder' && id === 'rename-folder') setDialog({ kind: 'folder-rename', target: payload })
         else if (kind === 'folder' && id === 'delete-folder') setDialog({ kind: 'folder-delete', path: payload.path, scope: payload.scope, name: payload.name })
-        else if (kind === 'sgroup' && id === 'service-binding') {
-          const workspace = (items || []).find(w => w.workspaceId === payload.workspaceId)
-          if (workspace) setDialog({ kind: 'service-binding', workspace: { ...workspace, sessionIds: payload.sessionIds || [] }, bindingKey: 'group:' + payload.workspaceId + ':' + payload.path, groupPath: payload.path })
-        }
         else if (kind === 'sgroup' && id === 'delete-sgroup') setDialog({ kind: 'sgroup-delete', target: payload })
         else if (kind === 'workspace' && id === 'rename') setDialog({ kind: 'ws-rename', workspace: payload })
         else if (kind === 'workspace' && id === 'delete') setDialog({ kind: 'ws-delete', workspace: payload })
@@ -6839,6 +6903,20 @@ window.__ModuleLoader__.load({
             t,
           })
         }
+        if (dialog.kind === 'subgroup-new') return E(TextDialog, {
+          key: 'subgroup-new', title: t('group.newSubgroup'), hint: dialog.target.path,
+          initial: '',
+          onConfirm: value => {
+            const name = normPath(String(value || ''))
+            if (!name || splitTitleSegs(name).length !== 1) { setErrorText(t('group.nameError')); return }
+            const path = dialog.target.path + '/' + name
+            actions.addFolder('session', dialog.target.workspaceId, path)
+            actions.setSessionsExpanded(dialog.target.workspaceId, true)
+            actions.setSessionGroupExpanded(dialog.target.workspaceId + '|' + dialog.target.path, true)
+            setDialog(null)
+          },
+          onClose: () => setDialog(null), t,
+        })
         if (dialog.kind === 'sgroup-rename') return E(TextDialog, {
           key: 'sgroup-rename',
           title: t('menu.renameSgroup'),
@@ -7138,9 +7216,8 @@ window.__ModuleLoader__.load({
         dialogElement,
         (ctx !== null && typeof ui.Menu === 'function') ? E(ui.Menu, {
           // Right-click opens the SAME menu surface the official ⋯ button
-          // renders (primitives Menu, portal, dense): getAnchorRect feeds
-          // the event coordinates as the anchor rect — portal mode positions
-          // from it directly, no in-place wrapper needed.
+          // renders. rc.5 positions context menus through anchorPoint;
+          // getAnchorRect is not part of its Menu contract.
           open: true,
           onClose: () => setCtx(null),
           items: menuEntries(),
@@ -7148,7 +7225,11 @@ window.__ModuleLoader__.load({
           align: 'start',
           dense: true,
           portal: true,
-          getAnchorRect: () => new DOMRect(ctx.x, ctx.y, 0, 0),
+          anchor: null,
+          anchorPoint: { x: ctx.x, y: ctx.y },
+          contextual: true,
+          autoFocus: true,
+          returnFocus: () => ctx.trigger || null,
         }) : (ctx !== null ? E('div', {
           className: 'bw-ctx-overlay',
           onMouseDown: () => setCtx(null),
@@ -7243,9 +7324,15 @@ window.__ModuleLoader__.load({
         () => ctx.get('workspaceBoard'), workspaceId, label, failed)
       const titlesFeature = await require.async('./client.titles.js')
       const readTitles = await titlesFeature.mount(ctx)
-      bindingStore = serviceFeature.createBindingStore(async (workspaceId, id) => {
+      bindingStore = serviceFeature.createBindingStore(async (workspaceId, id, bindingKey) => {
         const rows = await readTitles(workspaceId, [id])
-        return rows.length === 1 && rows[0].id === id && rows[0].eligible
+        if (rows.length !== 1 || rows[0].id !== id || !rows[0].eligible || rows[0].error) return false
+        if (bindingKey === workspaceId) return true
+        const prefix = 'group:' + workspaceId + ':'
+        if (typeof bindingKey !== 'string' || !bindingKey.startsWith(prefix)) return false
+        const group = splitTitleSegs(bindingKey.slice(prefix.length))
+        const title = splitTitleSegs(rows[0].title, rows[0].sourceKind === 'user')
+        return group.length > 0 && title.length > group.length && group.every((part, i) => title[i] === part)
       })
       const restoration = recoveryFeature.createRestoration()
 
@@ -7272,6 +7359,22 @@ window.__ModuleLoader__.load({
       const sessions = ctx.get('sessions')
       const workspaces = ctx.get('workspaces')
       const uiWorkspace = ctx.get('uiWorkspace')
+      const groupCreateFeature = await require.async('./client.group-create.js')
+      const groupPickerFeature = await require.async('./client.group-picker.js')
+      const groupCreation = groupCreateFeature.create({
+        sessions, workspaces, uiWorkspace, sourceOf: titleSourceOf,
+        groupLeaf: title => splitTitleSegs(title).slice(-1)[0] || title,
+        newTitle: () => ctx.locale.bind(NS)('session.new'),
+        leafForGroup: (title, opaque) => {
+          const text = String(title || '')
+          if (!text.includes('/') || /^“[^”]*”$/.test(text) || /^"[^"]*"$/.test(text)) return text
+          return opaque || titleQuotesPath(text) ? '“' + text + '”' : text
+        },
+      })
+      const startSessionInGroup = (workspaceId, path) => groupCreation.start(workspaceId, path)
+      const heroGroupOptions = (list, workspace, state) => groupPickerFeature.options(list, workspace, state, {
+        buildSessionTree, groupsAllowedFor, cache: titleCache.byId,
+      })
       if (!sessions || !workspaces || !uiWorkspace) {
         console.error('[dsh-better-workspace] required services missing', {
           sessions: !!sessions, workspaces: !!workspaces, uiWorkspace: !!uiWorkspace,
@@ -7566,6 +7669,7 @@ window.__ModuleLoader__.load({
         officialT,
         bindingStore,
         workspaceBoardActions,
+        startSessionInGroup,
         readTitles,
         refreshCatalog: () => sessions.refresh(),
         // v0.32.2: the agent-preset face rides a stable GETTER, not a value.
@@ -7811,6 +7915,11 @@ window.__ModuleLoader__.load({
       // there would leave the hero with no popover at all.
       if (typeof ui.Menu === 'function') {
         const heroInjected = () => ({
+          localStore: () => ({ useStore: useViewStore, actions: viewInstance.actions }),
+          groupPickerComponent: groupPickerFeature.GroupPicker,
+          groupOptions: heroGroupOptions,
+          assignSessionGroup: groupCreation.assign,
+          groupPath: row => groupCreation.pathOf(row.id, row.title || '') ?? (groupsAllowedFor(row) ? splitTitleSegs(row.title || '').slice(0, -1).join('/') : ''),
           createWorkspace: (input) => workspaces.create(input),
           /**
            * The shipped occupant's ledger entry for the hero flow hole: the
@@ -7827,7 +7936,7 @@ window.__ModuleLoader__.load({
               return null
             }
           },
-          hooks: { directoryFlow: flowSource(slots, HERO_FLOW_HOLE) },
+          hooks: { sessions: sessions.list, workspaces: workspaces.list, directoryFlow: flowSource(slots, HERO_FLOW_HOLE) },
         })
         slots.inject('conversation.hero.workspace', guarded(
           'conversation.hero.workspace',
